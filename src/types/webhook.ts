@@ -10,3 +10,37 @@ export interface WebhookConfig {
 		timeWindow: number;
 	};
 }
+
+export interface WebhookPayload {
+	token: string;
+	events: WebhookEvent[];
+	site: {
+		id: string;
+		url: string;
+		name: string;
+		version: string;
+	};
+}
+
+export interface WebhookEvent {
+	eventname: string;
+	component: string;
+	action: string;
+	target: string;
+	objecttable: string;
+	objectid: number;
+	crud: 'c' | 'r' | 'u' | 'd';
+	edulevel: number;
+	contextid: number;
+	contextlevel: number;
+	contextinstanceid: number;
+	userid: number;
+	courseid?: number;
+	relateduserid?: number;
+	anonymous: number;
+	other: Record<string, any>;
+	timecreated: number;
+	origin: string;
+	ip: string;
+	realuserid?: number;
+}
