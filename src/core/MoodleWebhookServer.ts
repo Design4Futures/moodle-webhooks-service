@@ -7,6 +7,7 @@ import fastify, {
 	type FastifyReply,
 	type FastifyRequest,
 } from 'fastify';
+import type { WebhookEventQueue } from '../services/WebhookEventQueue';
 import type { EventHandler } from '../types/eventhandler';
 import type {
 	WebhookConfig,
@@ -19,9 +20,11 @@ export class MoodleWebhookServer {
 	private config: WebhookConfig;
 	private eventHandlers: Map<string, EventHandler[]> = new Map();
 	private startTime: number = Date.now();
+	private eventQueue: WebhookEventQueue | undefined;
 
-	constructor(config: WebhookConfig) {
+	constructor(config: WebhookConfig, eventQueue?: WebhookEventQueue) {
 		this.config = config;
+		this.eventQueue = eventQueue;
 		this.server = fastify({
 			logger: {
 				level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
@@ -113,6 +116,8 @@ export class MoodleWebhookServer {
 			async (request, _reply) => {
 				const event = request.body;
 
+				console.log('event', event);
+
 				//! Validar host
 				if (!this.isValidHost(event.host)) {
 					throw this.server.httpErrors.forbidden('Invalid host');
@@ -169,6 +174,16 @@ export class MoodleWebhookServer {
 			`Processando evento: ${event.eventname} - Usuário: ${event.userid}`,
 		);
 
+		//! Se RabbitMQ estiver configurado, envia o evento para a fila
+		if (this.eventQueue?.isConnected) {
+			try {
+				await this.eventQueue.publishEvent(event);
+				this.server.log.info(`Evento ${event.eventname} enviado para RabbitMQ`);
+			} catch (error) {
+				this.server.log.error(`Erro ao enviar evento para RabbitMQ:`, error);
+			}
+		}
+
 		const handlers = this.eventHandlers.get(event.eventname) || [];
 		const wildcardHandlers = this.eventHandlers.get('*') || [];
 
@@ -176,7 +191,6 @@ export class MoodleWebhookServer {
 
 		for (const handler of allHandlers) {
 			try {
-				// Criamos um payload mockado para manter compatibilidade com a assinatura do handler
 				const mockPayload: WebhookPayload = {
 					token: event.token,
 					events: [event],

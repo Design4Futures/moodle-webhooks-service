@@ -96,14 +96,14 @@ export class MoodleClient {
 		return this.makeRequest('core_user_get_users_by_field', {
 			field: 'id',
 			values: [id],
-		}).then((response) => response[0]);
+		}).then((response: any) => response[0]);
 	}
 
 	async getCourseById(id: number): Promise<MoodleCourse> {
 		return this.makeRequest('core_course_get_courses_by_field', {
 			field: 'id',
 			value: id,
-		}).then((response) => response?.courses[0]);
+		}).then((response: any) => response?.courses[0]);
 	}
 
 	// biome-ignore lint/suspicious/noExplicitAny: <any>

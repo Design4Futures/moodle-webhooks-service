@@ -1,0 +1,48 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: webhook-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"     # AMQP port
+      - "15672:15672"   # Management UI port
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - webhook-network
+
+  # Webhook service (opcional - para desenvolvimento)
+  webhook-service:
+    build: .
+    container_name: webhook-service
+    restart: unless-stopped
+    ports:
+      - "3333:3333"
+    environment:
+      - NODE_ENV=production
+      - WEBHOOK_PORT=3333
+      - WEBHOOK_HOST=0.0.0.0
+      - RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672
+      - RABBITMQ_EXCHANGE=webhook.events
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - webhook-network
+
+volumes:
+  rabbitmq_data:
+
+networks:
+  webhook-network:
+    driver: bridge

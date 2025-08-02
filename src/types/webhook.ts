@@ -1,14 +1,16 @@
 export interface WebhookConfig {
 	port: number;
-	host?: string;
+	host?: string | undefined;
 	path: string;
 	secret: string;
 	moodleUrl: string;
 	enabledEvents: string[];
-	rateLimiting?: {
-		max: number;
-		timeWindow: number;
-	};
+	rateLimiting?:
+		| {
+				max: number;
+				timeWindow: number;
+		  }
+		| undefined;
 }
 
 export interface WebhookPayload {

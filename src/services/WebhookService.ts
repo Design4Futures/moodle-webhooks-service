@@ -1,12 +1,9 @@
-import { MoodleClient } from '../lib/MoodleClient';
 import type { MoodleConfig } from '../types/moodle';
 import type { WebhookEvent, WebhookPayload } from '../types/webhook';
 
 export class WebhookService {
-	private moodleClient: MoodleClient;
-
-	constructor(config: MoodleConfig) {
-		this.moodleClient = new MoodleClient(config);
+	constructor(_config: MoodleConfig) {
+		console.log('WebhookService initialized with Moodle config');
 	}
 
 	public async process(
