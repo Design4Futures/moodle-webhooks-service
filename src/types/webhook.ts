@@ -28,19 +28,19 @@ export interface WebhookEvent {
 	action: string;
 	target: string;
 	objecttable: string;
-	objectid: number;
+	objectid: number | string;
 	crud: 'c' | 'r' | 'u' | 'd';
 	edulevel: number;
 	contextid: number;
 	contextlevel: number;
-	contextinstanceid: number;
-	userid: number;
+	contextinstanceid: number | string;
+	userid: number | string;
 	courseid?: number;
-	relateduserid?: number;
+	relateduserid?: number | string;
 	anonymous: number;
-	other: Record<string, any>;
+	other: Record<string, unknown> | null;
 	timecreated: number;
-	origin: string;
-	ip: string;
-	realuserid?: number;
+	host: string;
+	token: string;
+	extra: string;
 }
