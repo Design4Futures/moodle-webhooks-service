@@ -1,4 +1,8 @@
 import dotenv from 'dotenv';
+import {
+	InvalidConfigurationError,
+	MissingConfigurationError,
+} from '../errors';
 import type { ProcessingMode } from '../strategies/EventProcessingStrategyFactory';
 
 dotenv.config();
@@ -100,16 +104,20 @@ export class ConfigManager {
 		const { moodle, rabbitmq, processing } = this.config;
 
 		if (!moodle.baseUrl || !moodle.token) {
-			throw new Error(
-				'Moodle configuration (MOODLE_BASE_URL, MOODLE_TOKEN) is required',
-			);
+			throw new MissingConfigurationError(['MOODLE_BASE_URL', 'MOODLE_TOKEN'], {
+				component: 'ConfigManager',
+				reason: 'Moodle configuration is required for webhook processing',
+			});
 		}
 
 		if (processing.enableQueue && processing.mode !== 'direct') {
 			if (!rabbitmq || !rabbitmq.url) {
-				throw new Error(
-					'RabbitMQ configuration is required when queue processing is enabled',
-				);
+				throw new MissingConfigurationError(['RABBITMQ_URL'], {
+					component: 'ConfigManager',
+					reason:
+						'RabbitMQ configuration is required when queue processing is enabled',
+					currentMode: processing.mode,
+				});
 			}
 		}
 
@@ -117,8 +125,13 @@ export class ConfigManager {
 			processing.mode &&
 			!['direct', 'queue', 'hybrid'].includes(processing.mode)
 		) {
-			throw new Error(
-				`Invalid processing mode: ${processing.mode}. Must be 'direct', 'queue', or 'hybrid'`,
+			throw new InvalidConfigurationError(
+				'PROCESSING_MODE',
+				'direct | queue | hybrid',
+				{
+					providedValue: processing.mode,
+					validValues: ['direct', 'queue', 'hybrid'],
+				},
 			);
 		}
 	}
@@ -135,7 +148,13 @@ export class ConfigManager {
 
 	getRabbitMQConfig() {
 		if (!this.config.rabbitmq) {
-			throw new Error('RabbitMQ configuration not available');
+			throw new MissingConfigurationError(
+				['RABBITMQ_URL', 'RABBITMQ_EXCHANGE'],
+				{
+					component: 'ConfigManager',
+					reason: 'RabbitMQ configuration not available',
+				},
+			);
 		}
 		return this.config.rabbitmq;
 	}
