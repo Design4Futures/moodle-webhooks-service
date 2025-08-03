@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { ConfigManager } from '../config/ConfigManager';
 import { EventHandlerMapper } from '../config/EventHandlerMapper';
 import { EventRegistry } from '../config/EventRegistry';
+import { type ErrorHandler, initializeErrorHandling } from '../errors';
 import { MoodleEventHandlers } from '../handlers/MoodleEventHandler';
 import { MoodleClient } from '../lib/MoodleClient';
 import { WebhookEventQueue } from '../services/WebhookEventQueue';
@@ -28,10 +29,12 @@ class WebhookManager {
 	private eventRegistry: EventRegistry;
 	private processingContext!: EventProcessingContext;
 	private configManager: ConfigManager;
+	private errorHandler: ErrorHandler;
 
 	constructor(moodleClient?: MoodleClient, eventQueue?: WebhookEventQueue) {
 		this.configManager = ConfigManager.getInstance();
 		const config = this.configManager.getConfig();
+		this.errorHandler = initializeErrorHandling();
 
 		//! Criar configuração do webhook a partir do ConfigManager
 		const webhookConfig: WebhookConfig = {
@@ -60,6 +63,10 @@ class WebhookManager {
 		this.setupProcessingStrategy();
 		this.setupEventHandlers();
 		this.setupEventConsumers();
+	}
+
+	public getErrorHandler(): ErrorHandler {
+		return this.errorHandler;
 	}
 
 	private setupProcessingStrategy(): void {
@@ -303,7 +310,12 @@ if (require.main === module) {
 					await manager.stop();
 					process.exit(0);
 				} catch (error) {
-					console.error('Error during shutdown:', error);
+					manager
+						.getErrorHandler()
+						.handleError(
+							error instanceof Error ? error : new Error('Shutdown error'),
+							{ signal, component: 'WebhookManager', operation: 'shutdown' },
+						);
 					process.exit(1);
 				}
 			};
@@ -316,7 +328,15 @@ if (require.main === module) {
 
 			console.log('Webhook system started successfully!');
 		} catch (error) {
-			console.error('Failed to start webhook system:', error);
+			const manager = new WebhookManager();
+			manager
+				.getErrorHandler()
+				.handleError(
+					error instanceof Error
+						? error
+						: new Error('Failed to start webhook system'),
+					{ component: 'WebhookManager', operation: 'main' },
+				);
 			process.exit(1);
 		}
 	}

@@ -7,6 +7,11 @@ import fastify, {
 	type FastifyReply,
 	type FastifyRequest,
 } from 'fastify';
+import {
+	configureErrorHandling,
+	WebhookInvalidFormatError,
+	WebhookInvalidTokenError,
+} from '../errors';
 import type { WebhookEventQueue } from '../services/WebhookEventQueue';
 import type { EventHandler } from '../types/eventhandler';
 import type {
@@ -32,6 +37,9 @@ export class MoodleWebhookServer {
 			trustProxy: true,
 			bodyLimit: 10 * 1024 * 1024, //* 10MB
 		});
+
+		// Configure error handling
+		configureErrorHandling(this.server);
 
 		this.setupPlugins();
 		this.setupHooks();
@@ -120,12 +128,19 @@ export class MoodleWebhookServer {
 
 				//! Validar host
 				if (!this.isValidHost(event.host)) {
-					throw this.server.httpErrors.forbidden('Invalid host');
+					throw new WebhookInvalidFormatError('Host inválido para webhook', {
+						providedHost: event.host,
+						expectedHost: this.config.moodleUrl,
+						eventname: event.eventname,
+					});
 				}
 
 				//! Validar token
 				if (!this.isValidToken(event.token)) {
-					throw this.server.httpErrors.unauthorized('Invalid token');
+					throw new WebhookInvalidTokenError('Token de webhook inválido', {
+						eventname: event.eventname,
+						host: event.host,
+					});
 				}
 
 				//! Processar evento
