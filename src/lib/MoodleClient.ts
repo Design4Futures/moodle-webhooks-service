@@ -1,4 +1,12 @@
 import axios, { type AxiosInstance, type AxiosResponse } from 'axios';
+import {
+	MoodleAuthenticationError,
+	MoodleConnectionError,
+	MoodleInvalidParametersError,
+	MoodleInvalidResponseError,
+	MoodleResourceNotFoundError,
+	MoodleTimeoutError,
+} from '../errors';
 import type {
 	MoodleConfig,
 	MoodleCourse,
@@ -41,17 +49,100 @@ export class MoodleClient {
 			const response: AxiosResponse<T> = await this.client.post('', data);
 
 			if (this.isErrorResponse(response.data)) {
-				throw new Error(
-					`Moodle API Error: ${response.data.message || response.data.exception}`,
+				// Tratar diferentes tipos de erro do Moodle
+				const errorData = response.data as MoodleResponse;
+
+				if (
+					errorData.errorcode === 'invalidtoken' ||
+					errorData.errorcode === 'accessdenied'
+				) {
+					throw new MoodleAuthenticationError(
+						errorData.message || 'Token de autenticação inválido',
+						{ wsfunction, errorCode: errorData.errorcode },
+					);
+				}
+
+				if (errorData.errorcode === 'invalidparameter') {
+					throw new MoodleInvalidParametersError(Object.keys(params), {
+						wsfunction,
+						message: errorData.message,
+					});
+				}
+
+				throw new MoodleInvalidResponseError(
+					errorData.message ||
+						errorData.exception ||
+						'Resposta inválida da API do Moodle',
+					{
+						wsfunction,
+						errorCode: errorData.errorcode,
+						debugInfo: errorData.debuginfo,
+					},
 				);
 			}
 
 			return response.data;
 		} catch (error) {
 			if (axios.isAxiosError(error)) {
-				throw new Error(`HTTP Error: ${error.message}`);
+				// Tratar diferentes tipos de erro HTTP
+				if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+					throw new MoodleConnectionError(
+						'Não foi possível conectar ao servidor Moodle',
+						{
+							wsfunction,
+							baseUrl: this.config.baseUrl,
+							errorCode: error.code,
+						},
+					);
+				}
+
+				if (
+					error.code === 'ECONNABORTED' ||
+					error.message.includes('timeout')
+				) {
+					throw new MoodleTimeoutError(
+						30000, // timeout padrão
+						{ wsfunction, baseUrl: this.config.baseUrl },
+					);
+				}
+
+				if (error.response?.status === 401) {
+					throw new MoodleAuthenticationError('Credenciais inválidas', {
+						wsfunction,
+						status: error.response.status,
+					});
+				}
+
+				if (error.response?.status === 404) {
+					throw new MoodleResourceNotFoundError('endpoint', wsfunction, {
+						baseUrl: this.config.baseUrl,
+					});
+				}
+
+				throw new MoodleConnectionError(`Erro HTTP: ${error.message}`, {
+					wsfunction,
+					status: error.response?.status,
+					statusText: error.response?.statusText,
+				});
 			}
-			throw error;
+
+			// Re-throw erros já tipados
+			if (
+				error instanceof MoodleAuthenticationError ||
+				error instanceof MoodleConnectionError ||
+				error instanceof MoodleInvalidResponseError ||
+				error instanceof MoodleResourceNotFoundError ||
+				error instanceof MoodleTimeoutError ||
+				error instanceof MoodleInvalidParametersError
+			) {
+				throw error;
+			}
+
+			// Erro desconhecido
+			throw new MoodleInvalidResponseError(
+				`Erro desconhecido: ${error instanceof Error ? error.message : 'Unknown error'}`,
+				{ wsfunction, originalError: error },
+			);
 		}
 	}
 
@@ -93,17 +184,57 @@ export class MoodleClient {
 	}
 
 	async getUserById(id: number | string): Promise<MoodleUser> {
-		return this.makeRequest('core_user_get_users_by_field', {
-			field: 'id',
-			values: [id],
-		}).then((response: any) => response[0]);
+		try {
+			const response = await this.makeRequest<MoodleUser[]>(
+				'core_user_get_users_by_field',
+				{
+					field: 'id',
+					values: [id],
+				},
+			);
+
+			if (!response || response.length === 0 || !response[0]) {
+				throw new MoodleResourceNotFoundError('user', id);
+			}
+
+			return response[0];
+		} catch (error) {
+			if (error instanceof MoodleResourceNotFoundError) {
+				throw error;
+			}
+			throw new MoodleResourceNotFoundError('user', id, {
+				originalError: error,
+			});
+		}
 	}
 
 	async getCourseById(id: number): Promise<MoodleCourse> {
-		return this.makeRequest('core_course_get_courses_by_field', {
-			field: 'id',
-			value: id,
-		}).then((response: any) => response?.courses[0]);
+		try {
+			const response = await this.makeRequest<{ courses: MoodleCourse[] }>(
+				'core_course_get_courses_by_field',
+				{
+					field: 'id',
+					value: id,
+				},
+			);
+
+			if (
+				!response?.courses ||
+				response.courses.length === 0 ||
+				!response.courses[0]
+			) {
+				throw new MoodleResourceNotFoundError('course', id);
+			}
+
+			return response.courses[0];
+		} catch (error) {
+			if (error instanceof MoodleResourceNotFoundError) {
+				throw error;
+			}
+			throw new MoodleResourceNotFoundError('course', id, {
+				originalError: error,
+			});
+		}
 	}
 
 	// biome-ignore lint/suspicious/noExplicitAny: <any>

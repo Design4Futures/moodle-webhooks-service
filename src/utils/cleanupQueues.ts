@@ -1,12 +1,15 @@
 import dotenv from 'dotenv';
+import { MissingConfigurationError, QueueConnectionError } from '../errors';
 import { RabbitMQService } from '../services/RabbitMQService';
 
 dotenv.config();
 
 const cleanupQueues = async () => {
 	if (!process.env.RABBITMQ_URL) {
-		console.error('RABBITMQ_URL não configurado');
-		process.exit(1);
+		throw new MissingConfigurationError(['RABBITMQ_URL'], {
+			component: 'cleanupQueues',
+			reason: 'RABBITMQ_URL is required for queue cleanup',
+		});
 	}
 
 	console.log('Limpando filas do RabbitMQ...');
@@ -52,9 +55,16 @@ const cleanupQueues = async () => {
 		await rabbitmq.disconnect();
 		console.log(' Limpeza concluída');
 	} catch (error) {
-		console.error(' Erro durante limpeza:', error);
-		await rabbitmq.disconnect();
-		process.exit(1);
+		throw new QueueConnectionError('Erro durante limpeza das filas', {
+			originalError: error instanceof Error ? error.message : 'Unknown error',
+			component: 'cleanupQueues',
+		});
+	} finally {
+		try {
+			await rabbitmq.disconnect();
+		} catch (disconnectError) {
+			console.warn('Warning during disconnect:', disconnectError);
+		}
 	}
 };
 

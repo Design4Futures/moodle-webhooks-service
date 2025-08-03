@@ -1,3 +1,4 @@
+import { InvalidConfigurationError } from '../errors';
 import type { IEventHandler, IEventQueue } from '../interfaces/EventInterfaces';
 import { DirectProcessingStrategy } from './DirectProcessingStrategy';
 import { EventProcessingContext } from './EventProcessingContext';
@@ -19,8 +20,13 @@ export function createProcessingStrategy(
 
 		case 'queue':
 			if (!eventQueue) {
-				throw new Error(
-					'Fila de eventos é obrigatória para o modo de processamento via fila',
+				throw new InvalidConfigurationError(
+					'eventQueue',
+					'IEventQueue instance',
+					{
+						mode,
+						reason: 'Event queue is required for queue processing mode',
+					},
 				);
 			}
 			return new EventProcessingContext(
@@ -33,7 +39,14 @@ export function createProcessingStrategy(
 			);
 
 		default:
-			throw new Error(`Modo de processamento desconhecido: ${mode}`);
+			throw new InvalidConfigurationError(
+				'processingMode',
+				'direct | queue | hybrid',
+				{
+					providedMode: mode,
+					validModes: ['direct', 'queue', 'hybrid'],
+				},
+			);
 	}
 }
 

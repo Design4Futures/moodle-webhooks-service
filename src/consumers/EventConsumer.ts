@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { EventHandlerMapper } from '../config/EventHandlerMapper';
 import { EventRegistry } from '../config/EventRegistry';
+import { MissingConfigurationError } from '../errors';
 import { MoodleEventHandlers } from '../handlers/MoodleEventHandler';
 import { MoodleClient } from '../lib/MoodleClient';
 import { WebhookEventQueue } from '../services/WebhookEventQueue';
@@ -15,11 +16,20 @@ class EventConsumer {
 
 	constructor() {
 		if (!process.env.RABBITMQ_URL || !process.env.RABBITMQ_EXCHANGE) {
-			throw new Error('RabbitMQ configuration required for consumer');
+			throw new MissingConfigurationError(
+				['RABBITMQ_URL', 'RABBITMQ_EXCHANGE'],
+				{
+					component: 'EventConsumer',
+					reason: 'RabbitMQ configuration is required for the consumer',
+				},
+			);
 		}
 
 		if (!process.env.MOODLE_BASE_URL || !process.env.MOODLE_TOKEN) {
-			throw new Error('Moodle configuration required for consumer');
+			throw new MissingConfigurationError(['MOODLE_BASE_URL', 'MOODLE_TOKEN'], {
+				component: 'EventConsumer',
+				reason: 'Moodle configuration is required for the consumer',
+			});
 		}
 
 		this.eventQueue = new WebhookEventQueue({

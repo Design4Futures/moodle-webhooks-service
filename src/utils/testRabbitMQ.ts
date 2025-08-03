@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { MissingConfigurationError, QueueConnectionError } from '../errors';
 import { WebhookEventQueue } from '../services/WebhookEventQueue';
 import type { WebhookEvent } from '../types/webhook';
 
@@ -6,9 +7,10 @@ dotenv.config();
 
 const testRabbitMQIntegration = async () => {
 	if (!process.env.RABBITMQ_URL || !process.env.RABBITMQ_EXCHANGE) {
-		console.error(' Configuração do RabbitMQ não encontrada');
-		console.log('Configure RABBITMQ_URL e RABBITMQ_EXCHANGE no arquivo .env');
-		process.exit(1);
+		throw new MissingConfigurationError(['RABBITMQ_URL', 'RABBITMQ_EXCHANGE'], {
+			component: 'testRabbitMQ',
+			reason: 'RabbitMQ configuration is required for testing',
+		});
 	}
 
 	console.log('Testando integração RabbitMQ...');
@@ -65,16 +67,24 @@ const testRabbitMQIntegration = async () => {
 		await eventQueue.shutdown();
 		console.log('Teste concluído com sucesso');
 	} catch (error) {
-		console.error('Erro durante o teste:', error);
-		await eventQueue.shutdown();
-		process.exit(1);
+		throw new QueueConnectionError('Erro durante o teste do RabbitMQ', {
+			originalError: error instanceof Error ? error.message : 'Unknown error',
+			component: 'testRabbitMQIntegration',
+		});
+	} finally {
+		try {
+			await eventQueue.shutdown();
+		} catch (shutdownError) {
+			console.warn('Warning during shutdown:', shutdownError);
+		}
 	}
 };
 
 const testEventProcessing = async () => {
 	if (!process.env.RABBITMQ_URL || !process.env.RABBITMQ_EXCHANGE) {
-		console.error('Configuração do RabbitMQ não encontrada');
-		process.exit(1);
+		throw new MissingConfigurationError(['RABBITMQ_URL', 'RABBITMQ_EXCHANGE'], {
+			component: 'testEventProcessing',
+		});
 	}
 
 	console.log('Testando processamento de eventos...');
@@ -111,9 +121,19 @@ const testEventProcessing = async () => {
 		//* Manter o processo vivo
 		await new Promise(() => {});
 	} catch (error) {
-		console.error('Erro durante o teste:', error);
-		await eventQueue.shutdown();
-		process.exit(1);
+		throw new QueueConnectionError(
+			'Erro durante o teste de processamento de eventos',
+			{
+				originalError: error instanceof Error ? error.message : 'Unknown error',
+				component: 'testEventProcessing',
+			},
+		);
+	} finally {
+		try {
+			await eventQueue.shutdown();
+		} catch (shutdownError) {
+			console.warn('Warning during shutdown:', shutdownError);
+		}
 	}
 };
 
@@ -139,5 +159,8 @@ const main = async () => {
 };
 
 if (require.main === module) {
-	main().catch(console.error);
+	main().catch((error) => {
+		console.error('Error in main:', error);
+		process.exit(1);
+	});
 }
