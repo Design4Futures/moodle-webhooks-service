@@ -1,3 +1,4 @@
+import { QueueConnectionError } from '../errors';
 import type {
 	IEventProcessingStrategy,
 	IEventQueue,
@@ -18,7 +19,14 @@ export class QueueProcessingStrategy implements IEventProcessingStrategy {
 				`Evento ${event.eventname} enviado para fila de processamento`,
 			);
 		} else {
-			throw new Error('Fila de eventos não está disponível ou não conectada');
+			throw new QueueConnectionError(
+				'Fila de eventos não está disponível ou não conectada',
+				{
+					eventname: event.eventname,
+					isConnected: this.eventQueue?.isConnected,
+					isEventSupported: this.eventQueue?.isEventSupported(event.eventname),
+				},
+			);
 		}
 	}
 
