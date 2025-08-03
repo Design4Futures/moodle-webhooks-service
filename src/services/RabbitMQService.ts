@@ -1,5 +1,10 @@
 /** biome-ignore-all lint/suspicious/noExplicitAny: <any> */
 import * as amqp from 'amqplib';
+import {
+	QueueConnectionError,
+	QueueCreationError,
+	QueuePublishError,
+} from '../errors';
 import type { WebhookEvent } from '../types/webhook';
 
 export interface RabbitMQConfig {
@@ -55,8 +60,11 @@ export class RabbitMQService {
 			this.isConnected = true;
 			console.log('Conectado ao RabbitMQ com sucesso');
 		} catch (error) {
-			console.error('Erro ao conectar ao RabbitMQ:', error);
-			throw error;
+			throw new QueueConnectionError('Erro ao conectar ao RabbitMQ', {
+				url: this.config.url,
+				exchangeName: this.config.exchangeName,
+				originalError: error instanceof Error ? error.message : 'Unknown error',
+			});
 		}
 	}
 
@@ -71,7 +79,9 @@ export class RabbitMQService {
 			this.isConnected = false;
 			console.log('Desconectado do RabbitMQ');
 		} catch (error) {
-			console.error('Erro ao desconectar do RabbitMQ:', error);
+			throw new QueueConnectionError('Erro ao desconectar do RabbitMQ', {
+				originalError: error instanceof Error ? error.message : 'Unknown error',
+			});
 		}
 	}
 
@@ -81,7 +91,11 @@ export class RabbitMQService {
 		options: MessageOptions = {},
 	): Promise<void> {
 		if (!this.isConnected || !this.channel) {
-			throw new Error('RabbitMQ is not connected');
+			throw new QueueConnectionError('RabbitMQ não está conectado', {
+				routingKey,
+				isConnected: this.isConnected,
+				hasChannel: !!this.channel,
+			});
 		}
 
 		const message = {
@@ -107,7 +121,15 @@ export class RabbitMQService {
 			);
 
 			if (!published) {
-				throw new Error('Falha ao publicar mensagem - buffer cheio');
+				throw new QueuePublishError(
+					routingKey,
+					new Error('Buffer cheio - falha ao publicar mensagem'),
+					{
+						eventname: event.eventname,
+						userid: event.userid,
+						messageId: message.messageId,
+					},
+				);
 			}
 
 			console.log(` Evento publicado: ${routingKey}`, {
@@ -116,8 +138,14 @@ export class RabbitMQService {
 				messageId: message.messageId,
 			});
 		} catch (error) {
-			console.error(`Erro ao publicar evento ${routingKey}:`, error);
-			throw error;
+			throw new QueuePublishError(
+				routingKey,
+				error instanceof Error ? error : new Error('Unknown error'),
+				{
+					eventname: event.eventname,
+					userid: event.userid,
+				},
+			);
 		}
 	}
 
@@ -133,29 +161,40 @@ export class RabbitMQService {
 		} = {},
 	): Promise<void> {
 		if (!this.channel) {
-			throw new Error('Canal RabbitMQ não está disponível');
+			throw new QueueConnectionError('Canal RabbitMQ não está disponível', {
+				queueName,
+				routingKey,
+			});
 		}
 
-		const queueOptions = {
-			durable: true,
-			exclusive: false,
-			autoDelete: false,
-			arguments: {
-				'x-dead-letter-exchange':
-					options.deadLetterExchange || `${this.config.exchangeName}.dlx`,
-				...(options.messageTtl && { 'x-message-ttl': options.messageTtl }),
-			},
-			...options,
-		};
+		try {
+			const queueOptions = {
+				durable: true,
+				exclusive: false,
+				autoDelete: false,
+				arguments: {
+					'x-dead-letter-exchange':
+						options.deadLetterExchange || `${this.config.exchangeName}.dlx`,
+					...(options.messageTtl && { 'x-message-ttl': options.messageTtl }),
+				},
+				...options,
+			};
 
-		await this.channel.assertQueue(queueName, queueOptions);
-		await this.channel.bindQueue(
-			queueName,
-			this.config.exchangeName,
-			routingKey,
-		);
+			await this.channel.assertQueue(queueName, queueOptions);
+			await this.channel.bindQueue(
+				queueName,
+				this.config.exchangeName,
+				routingKey,
+			);
 
-		console.log(`Fila criada: ${queueName} -> ${routingKey}`);
+			console.log(`Fila criada: ${queueName} -> ${routingKey}`);
+		} catch (error) {
+			throw new QueueCreationError(
+				queueName,
+				error instanceof Error ? error : new Error('Unknown error'),
+				{ routingKey, options },
+			);
+		}
 	}
 
 	async consumeQueue(
@@ -169,7 +208,9 @@ export class RabbitMQService {
 		} = {},
 	): Promise<void> {
 		if (!this.channel) {
-			throw new Error('Canal RabbitMQ não está disponível');
+			throw new QueueConnectionError('Canal RabbitMQ não está disponível', {
+				queueName,
+			});
 		}
 
 		if (options.prefetch) {
@@ -194,7 +235,7 @@ export class RabbitMQService {
 						error,
 					);
 
-					//* Rejeita a mensagem e envia para dead letter queue
+					// Rejeita a mensagem e envia para dead letter queue
 					if (!options.noAck && this.channel) {
 						this.channel.nack(msg, false, false);
 					}
@@ -211,14 +252,28 @@ export class RabbitMQService {
 		consumerCount: number;
 	}> {
 		if (!this.channel) {
-			throw new Error('Canal RabbitMQ não está disponível');
+			throw new QueueConnectionError('Canal RabbitMQ não está disponível', {
+				queueName,
+				operation: 'getQueueInfo',
+			});
 		}
 
-		const queueInfo = await this.channel.checkQueue(queueName);
-		return {
-			messageCount: queueInfo.messageCount,
-			consumerCount: queueInfo.consumerCount,
-		};
+		try {
+			const queueInfo = await this.channel.checkQueue(queueName);
+			return {
+				messageCount: queueInfo.messageCount,
+				consumerCount: queueInfo.consumerCount,
+			};
+		} catch (error) {
+			throw new QueueConnectionError(
+				`Erro ao obter informações da fila ${queueName}`,
+				{
+					queueName,
+					originalError:
+						error instanceof Error ? error.message : 'Unknown error',
+				},
+			);
+		}
 	}
 
 	private handleConnectionError(error: Error): void {

@@ -1,4 +1,8 @@
 import { EventRegistry } from '../config/EventRegistry';
+import {
+	EventHandlerNotFoundError,
+	WebhookEventProcessingError,
+} from '../errors';
 import type { IEventQueue } from '../interfaces/EventInterfaces';
 import type { WebhookEvent } from '../types/webhook';
 import { type RabbitMQConfig, RabbitMQService } from './RabbitMQService';
@@ -141,7 +145,11 @@ export class WebhookEventQueue implements IEventQueue {
 	): Promise<void> {
 		const config = this.eventRegistry.getEventConfig(eventType);
 		if (!config) {
-			throw new Error(`Configuration not found for event: ${eventType}`);
+			throw new EventHandlerNotFoundError(eventType, {
+				availableEvents: this.eventRegistry
+					.getAllEvents()
+					.map((e) => e.eventName),
+			});
 		}
 
 		await this.rabbitmq.consumeQueue(
@@ -156,17 +164,15 @@ export class WebhookEventQueue implements IEventQueue {
 					);
 					console.log(`Event ${eventType} processed successfully`);
 				} catch (error) {
-					console.error(`Error processing event ${eventType}:`, error);
-
-					if (retryCount < (config.retries || 2)) {
-						await this.retryFailedEvent(eventMessage, retryCount);
-					} else {
-						console.error(
-							`Event ${eventType} failed permanently after ${retryCount} attempts`,
-						);
-					}
-
-					throw error;
+					throw new WebhookEventProcessingError(
+						eventType,
+						error instanceof Error ? error : new Error('Unknown error'),
+						{
+							retryCount,
+							maxRetries: config.retries || 2,
+							messageId: eventMessage.messageId,
+						},
+					);
 				}
 			},
 			{
