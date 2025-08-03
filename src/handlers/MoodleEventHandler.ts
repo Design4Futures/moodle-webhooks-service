@@ -1,5 +1,6 @@
 /** biome-ignore-all lint/suspicious/noExplicitAny: <any> */
 /** biome-ignore-all lint/style/noNonNullAssertion: <any> */
+import { EventHandlerExecutionError } from '../errors';
 import type { MoodleClient } from '../lib/MoodleClient';
 import type { EventHandler } from '../types/eventhandler';
 import type { WebhookEvent } from '../types/webhook';
@@ -22,7 +23,16 @@ export class MoodleEventHandlers {
 				this.notifyAdmins(user),
 			]);
 		} catch (error) {
-			console.error('Erro ao processar criação de usuário:', error);
+			throw new EventHandlerExecutionError(
+				'user_created',
+				'MoodleEventHandlers.userCreated',
+				error instanceof Error ? error : new Error('Unknown error'),
+				{
+					eventName: event.eventname,
+					userId: event.objectid,
+					timestamp: event.timecreated,
+				},
+			);
 		}
 	};
 
@@ -43,7 +53,17 @@ export class MoodleEventHandlers {
 				this.triggerNextCourseRecommendation(user, course),
 			]);
 		} catch (error) {
-			console.error('Erro ao processar conclusão do curso:', error);
+			throw new EventHandlerExecutionError(
+				'course_completed',
+				'MoodleEventHandlers.courseCompleted',
+				error instanceof Error ? error : new Error('Unknown error'),
+				{
+					eventName: event.eventname,
+					userId: event.userid,
+					courseId: event.courseid,
+					timestamp: event.timecreated,
+				},
+			);
 		}
 	};
 
@@ -58,13 +78,23 @@ export class MoodleEventHandlers {
 			//* Registrar análise de comportamento
 			await this.logUserActivity(user, 'login');
 		} catch (error) {
-			console.error('Erro ao processar login do usuário:', error);
+			throw new EventHandlerExecutionError(
+				'user_logged_in',
+				'MoodleEventHandlers.userLoggedIn',
+				error instanceof Error ? error : new Error('Unknown error'),
+				{
+					eventName: event.eventname,
+					userId: event.userid,
+					timestamp: event.timecreated,
+				},
+			);
 		}
 	};
 
 	//TODO: user-enrolment event implements
 	userEnrolled: EventHandler = async (event: WebhookEvent) => {
-		console.log(`Usuário matriculado: ID ${event.userid} no curso ${event.courseid}`,
+		console.log(
+			`Usuário matriculado: ID ${event.userid} no curso ${event.courseid}`,
 		);
 
 		try {
@@ -79,7 +109,17 @@ export class MoodleEventHandlers {
 				this.updateExternalProgress(user, course, 'enrolled'),
 			]);
 		} catch (error) {
-			console.error('Erro ao processar matrícula do usuário:', error);
+			throw new EventHandlerExecutionError(
+				'user_enrolled',
+				'MoodleEventHandlers.userEnrolled',
+				error instanceof Error ? error : new Error('Unknown error'),
+				{
+					eventName: event.eventname,
+					userId: event.userid,
+					courseId: event.courseid,
+					timestamp: event.timecreated,
+				},
+			);
 		}
 	};
 
@@ -94,7 +134,17 @@ export class MoodleEventHandlers {
 			//* Processar submissão
 			await this.processAssignmentSubmission(user, event);
 		} catch (error) {
-			console.error('Erro ao processar submissão de atividade:', error);
+			throw new EventHandlerExecutionError(
+				'assignment_submitted',
+				'MoodleEventHandlers.assignmentSubmitted',
+				error instanceof Error ? error : new Error('Unknown error'),
+				{
+					eventName: event.eventname,
+					userId: event.userid,
+					assignmentId: event.objectid,
+					timestamp: event.timecreated,
+				},
+			);
 		}
 	};
 
@@ -109,7 +159,17 @@ export class MoodleEventHandlers {
 			//* Processar attempt de quiz
 			await this.processQuizAttempt(user, event);
 		} catch (error) {
-			console.error('Erro ao processar attempt de quiz:', error);
+			throw new EventHandlerExecutionError(
+				'quiz_attempt_finished',
+				'MoodleEventHandlers.quizAttemptFinished',
+				error instanceof Error ? error : new Error('Unknown error'),
+				{
+					eventName: event.eventname,
+					userId: event.userid,
+					courseId: event.courseid,
+					timestamp: event.timecreated,
+				},
+			);
 		}
 	};
 
@@ -124,7 +184,8 @@ export class MoodleEventHandlers {
 	}
 
 	private async notifyAdmins(user: unknown): Promise<void> {
-		console.log(`Admins notificados sobre novo usuário: ${JSON.stringify(user)}`,
+		console.log(
+			`Admins notificados sobre novo usuário: ${JSON.stringify(user)}`,
 		);
 	}
 
@@ -132,7 +193,8 @@ export class MoodleEventHandlers {
 		user: unknown,
 		activity: string,
 	): Promise<void> {
-		console.log(`Atividade registrada: ${activity} para ${JSON.stringify(user)}`,
+		console.log(
+			`Atividade registrada: ${activity} para ${JSON.stringify(user)}`,
 		);
 		//TODO: Implementar análise de comportamento
 	}
@@ -141,7 +203,8 @@ export class MoodleEventHandlers {
 		user: unknown,
 		course: unknown,
 	): Promise<void> {
-		console.log(`Email de matrícula enviado para ${JSON.stringify(user)} no curso ${JSON.stringify(course)}`,
+		console.log(
+			`Email de matrícula enviado para ${JSON.stringify(user)} no curso ${JSON.stringify(course)}`,
 		);
 		//TODO: Implementar email de matrícula
 	}
@@ -150,7 +213,8 @@ export class MoodleEventHandlers {
 		user: unknown,
 		event: WebhookEvent,
 	): Promise<void> {
-		console.log(`Processando submissão de atividade para ${JSON.stringify(user)}, evento: ${event.eventname}`,
+		console.log(
+			`Processando submissão de atividade para ${JSON.stringify(user)}, evento: ${event.eventname}`,
 		);
 		//TODO: Implementar processamento de submissão
 	}
@@ -159,7 +223,8 @@ export class MoodleEventHandlers {
 		user: unknown,
 		event: WebhookEvent,
 	): Promise<void> {
-		console.log(`Processando attempt de quiz para ${JSON.stringify(user)}, evento: ${event.eventname}`,
+		console.log(
+			`Processando attempt de quiz para ${JSON.stringify(user)}, evento: ${event.eventname}`,
 		);
 		//TODO: Implementar processamento de quiz
 	}
@@ -192,7 +257,8 @@ export class MoodleEventHandlers {
 		user: unknown,
 		_course: unknown,
 	): Promise<void> {
-		console.log(`Recomendações de próximos cursos para ${JSON.stringify(user)}`,
+		console.log(
+			`Recomendações de próximos cursos para ${JSON.stringify(user)}`,
 		);
 	}
 }
