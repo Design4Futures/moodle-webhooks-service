@@ -109,10 +109,7 @@ class WebhookManager {
 	}
 
 	private async setupEventConsumers(): Promise<void> {
-		if (!this.eventQueue?.isConnected) {
-			console.log('RabbitMQ is not connected, skipping consumers setup');
-			return;
-		}
+		if (!this.eventQueue?.isConnected) return;
 
 		//! Configurar consumers para processar eventos das filas
 		const supportedEvents = this.handlerMapper.getSupportedEvents();
@@ -148,39 +145,9 @@ class WebhookManager {
 	}
 
 	async start(): Promise<void> {
-		const configManager = ConfigManager.getInstance();
-		const config = configManager.getConfig();
-
-		if (this.eventQueue) {
-			console.log('Initializing RabbitMQ...');
-			await this.eventQueue.initialize();
-			console.log('RabbitMQ connected and queues created');
-		}
+		if (this.eventQueue) await this.eventQueue.initialize();
 
 		await this.server.start();
-		console.log(
-			`Webhook server started at http://${config.server.host}:${config.server.port}`,
-		);
-
-		//* Registrar configuração
-		console.log('Webhook Manager started successfully');
-		console.log(`Processing mode: ${config.processing.mode}`);
-		console.log(
-			`RabbitMQ integration: ${this.eventQueue ? 'enabled' : 'disabled'}`,
-		);
-		console.log(
-			`Queue processing: ${configManager.isQueueEnabled() ? 'enabled' : 'disabled'}`,
-		);
-
-		//! Mostrar eventos habilitados
-		const enabledEvents = this.eventRegistry.getEnabledEvents();
-		console.log(`Enabled events (${enabledEvents.length}):`, enabledEvents);
-
-		if (this.eventQueue) {
-			console.log('Event handlers registered for RabbitMQ consumers');
-		} else {
-			console.log('Events will be processed directly without queue');
-		}
 	}
 
 	async stop(): Promise<void> {
@@ -274,15 +241,6 @@ async function createWebhookManager(): Promise<WebhookManager> {
 	//! Obter configuração centralizada
 	const configManager = ConfigManager.getInstance();
 
-	console.log('Initializing webhook system with configuration:');
-	console.log(
-		`- Processing Mode: ${configManager.getConfig().processing.mode}`,
-	);
-	console.log(`- Queue Enabled: ${configManager.isQueueEnabled()}`);
-	console.log(
-		`- Server: ${configManager.getConfig().server.host}:${configManager.getConfig().server.port}`,
-	);
-
 	//! Criar fila de eventos RabbitMQ se habilitada
 	let eventQueue: WebhookEventQueue | undefined;
 	if (configManager.isQueueEnabled()) {
@@ -299,8 +257,6 @@ async function createWebhookManager(): Promise<WebhookManager> {
 if (require.main === module) {
 	async function main() {
 		try {
-			console.log('Starting Webhook System...');
-
 			const manager = await createWebhookManager();
 
 			//! Configurar desligamento graceful
@@ -325,8 +281,6 @@ if (require.main === module) {
 
 			//! Iniciar o webhook manager
 			await manager.start();
-
-			console.log('Webhook system started successfully!');
 		} catch (error) {
 			const manager = new WebhookManager();
 			manager

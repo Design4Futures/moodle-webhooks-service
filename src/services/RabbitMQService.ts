@@ -37,7 +37,6 @@ export class RabbitMQService {
 
 	async connect(): Promise<void> {
 		try {
-			console.log('Connecting to RabbitMQ...');
 			this.connection = await amqp.connect(this.config.url);
 			this.channel = await this.connection.createChannel();
 
@@ -58,7 +57,6 @@ export class RabbitMQService {
 			this.connection?.on('close', this.handleConnectionClose.bind(this));
 
 			this.isConnected = true;
-			console.log('Conectado ao RabbitMQ com sucesso');
 		} catch (error) {
 			throw new QueueConnectionError('Erro ao conectar ao RabbitMQ', {
 				url: this.config.url,
@@ -186,8 +184,6 @@ export class RabbitMQService {
 				this.config.exchangeName,
 				routingKey,
 			);
-
-			console.log(`Fila criada: ${queueName} -> ${routingKey}`);
 		} catch (error) {
 			throw new QueueCreationError(
 				queueName,

@@ -10,11 +10,7 @@ export interface EventConfig {
 
 export const MOODLE_EVENTS = {
 	USER_CREATED: '\\core\\event\\user_created',
-	USER_LOGGED_IN: '\\core\\event\\user_loggedin',
-	USER_ENROLLED: '\\core\\event\\user_enrolment_created',
 	COURSE_COMPLETED: '\\core\\event\\course_completed',
-	ASSIGNMENT_SUBMITTED: '\\mod_assign\\event\\assessable_submitted',
-	QUIZ_ATTEMPTED: '\\mod_quiz\\event\\attempt_submitted',
 } as const;
 
 export type MoodleEventType =
@@ -47,26 +43,6 @@ export class EventRegistry {
 		});
 
 		this.registerEvent({
-			eventName: MOODLE_EVENTS.USER_LOGGED_IN,
-			queueName: 'webhook.user.login',
-			routingKey: 'user.login',
-			priority: 3,
-			retries: 1,
-			ttl: 60000, //* 1 minute
-			description: 'User login events',
-		});
-
-		this.registerEvent({
-			eventName: MOODLE_EVENTS.USER_ENROLLED,
-			queueName: 'webhook.user.enrolment',
-			routingKey: 'user.enrolment',
-			priority: 7,
-			retries: 3,
-			ttl: 300000, //* 5 minutes
-			description: 'User enrollment events',
-		});
-
-		this.registerEvent({
 			eventName: MOODLE_EVENTS.COURSE_COMPLETED,
 			queueName: 'webhook.course.completed',
 			routingKey: 'course.completed',
@@ -74,26 +50,6 @@ export class EventRegistry {
 			retries: 5,
 			ttl: 600000, //* 10 minutes
 			description: 'Course completion events',
-		});
-
-		this.registerEvent({
-			eventName: MOODLE_EVENTS.ASSIGNMENT_SUBMITTED,
-			queueName: 'webhook.assignment.submitted',
-			routingKey: 'assignment.submitted',
-			priority: 6,
-			retries: 2,
-			ttl: 300000, //* 5 minutes
-			description: 'Assignment submission events',
-		});
-
-		this.registerEvent({
-			eventName: MOODLE_EVENTS.QUIZ_ATTEMPTED,
-			queueName: 'webhook.quiz.submitted',
-			routingKey: 'quiz.submitted',
-			priority: 6,
-			retries: 2,
-			ttl: 300000, //* 5 minutes
-			description: 'Quiz attempt events',
 		});
 	}
 

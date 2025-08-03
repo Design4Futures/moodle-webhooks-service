@@ -15,19 +15,9 @@ export class EventHandlerMapper implements IEventHandlerMapper {
 
 	private setupHandlerMapping(handlers: MoodleEventHandlers): void {
 		this.handlerMap.set(MOODLE_EVENTS.USER_CREATED, handlers.userCreated);
-		this.handlerMap.set(MOODLE_EVENTS.USER_LOGGED_IN, handlers.userLoggedIn);
-		this.handlerMap.set(MOODLE_EVENTS.USER_ENROLLED, handlers.userEnrolled);
 		this.handlerMap.set(
 			MOODLE_EVENTS.COURSE_COMPLETED,
 			handlers.courseCompleted,
-		);
-		this.handlerMap.set(
-			MOODLE_EVENTS.ASSIGNMENT_SUBMITTED,
-			handlers.assignmentSubmitted,
-		);
-		this.handlerMap.set(
-			MOODLE_EVENTS.QUIZ_ATTEMPTED,
-			handlers.quizAttemptFinished,
 		);
 	}
 
