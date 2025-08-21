@@ -7,6 +7,7 @@ import { EventRegistry } from '../config/EventRegistry';
 import { type ErrorHandler, initializeErrorHandling } from '../errors';
 import { MoodleEventHandlers } from '../handlers/MoodleEventHandler';
 import { MoodleClient } from '../lib/MoodleClient';
+import { ServiceClient } from '../lib/ServiceClient';
 import { WebhookEventQueue } from '../services/WebhookEventQueue';
 import type { EventProcessingContext } from '../strategies/EventProcessingStrategy';
 import {
@@ -55,7 +56,11 @@ class WebhookManager {
 
 		const moodleClientInstance =
 			moodleClient || new MoodleClient(config.moodle);
-		this.handlers = new MoodleEventHandlers(moodleClientInstance);
+		const serviceClientInstance = new ServiceClient(config);
+		this.handlers = new MoodleEventHandlers(
+			moodleClientInstance,
+			serviceClientInstance,
+		);
 
 		this.handlerMapper = new EventHandlerMapper(this.handlers);
 		this.eventRegistry = EventRegistry.getInstance();

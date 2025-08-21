@@ -121,7 +121,7 @@ export class MoodleWebhookServer {
 		this.server.post<{ Body: WebhookEvent }>(
 			this.config.path,
 			{ schema: webhookSchema },
-			async (request, _reply) => {
+			async (request, reply) => {
 				const event = request.body;
 
 				console.log('event', event);
@@ -143,13 +143,42 @@ export class MoodleWebhookServer {
 					});
 				}
 
-				//! Processar evento
-				await this.processEvent(event);
+				// Enfileirar o evento para processamento assíncrono
+				if (
+					this.eventQueue?.isConnected &&
+					this.config.enabledEvents.includes(event.eventname)
+				) {
+					try {
+						// Enfileira o evento no RabbitMQ sem esperar pelo processamento
+						this.eventQueue.publishEvent(event).catch((error) => {
+							this.server.log.error(
+								`Erro ao enviar evento para RabbitMQ:`,
+								error,
+							);
+						});
+						this.server.log.info(
+							`Evento ${event.eventname} enviado para RabbitMQ`,
+						);
+					} catch (error) {
+						this.server.log.error(
+							`Erro ao enviar evento para RabbitMQ:`,
+							error,
+						);
+					}
+				}
 
-				return {
+				// Responde ao cliente imediatamente
+				reply.send({
 					status: 'success',
 					timestamp: new Date().toISOString(),
-				};
+				});
+
+				// Processa o evento de forma assíncrona após responder ao cliente
+				setImmediate(() => {
+					this.processEvent(event).catch((error) => {
+						this.server.log.error(`Erro ao processar evento:`, error);
+					});
+				});
 			},
 		);
 
@@ -189,15 +218,8 @@ export class MoodleWebhookServer {
 			`Processando evento: ${event.eventname} - Usuário: ${event.userid}`,
 		);
 
-		//! Se RabbitMQ estiver configurado, envia o evento para a fila
-		if (this.eventQueue?.isConnected) {
-			try {
-				await this.eventQueue.publishEvent(event);
-				this.server.log.info(`Evento ${event.eventname} enviado para RabbitMQ`);
-			} catch (error) {
-				this.server.log.error(`Erro ao enviar evento para RabbitMQ:`, error);
-			}
-		}
+		// O evento já foi enviado para o RabbitMQ na rota POST,
+		// então aqui só processamos os handlers diretos, se necessário
 
 		const handlers = this.eventHandlers.get(event.eventname) || [];
 		const wildcardHandlers = this.eventHandlers.get('*') || [];
@@ -218,6 +240,7 @@ export class MoodleWebhookServer {
 				};
 				await handler(event, mockPayload);
 			} catch (error) {
+				console.log(error);
 				this.server.log.error(
 					`Erro no handler para ${event.eventname}:`,
 					error,

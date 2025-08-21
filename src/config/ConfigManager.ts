@@ -35,6 +35,9 @@ export interface AppConfig {
 		level: 'debug' | 'info' | 'warn' | 'error';
 		enableAnalytics: boolean;
 	};
+	service: {
+		baseUrl: string;
+	};
 }
 
 export class ConfigManager {
@@ -82,6 +85,9 @@ export class ConfigManager {
 					(process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error') ||
 					'info',
 				enableAnalytics: process.env.ENABLE_ANALYTICS !== 'false',
+			},
+			service: {
+				baseUrl: process.env.SERVICE_BASE_URL || 'http://localhost:3000',
 			},
 		};
 

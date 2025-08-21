@@ -2,11 +2,15 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: <any> */
 import { EventHandlerExecutionError } from '../errors';
 import type { MoodleClient } from '../lib/MoodleClient';
+import type { ServiceClient } from '../lib/ServiceClient';
 import type { EventHandler } from '../types/eventhandler';
 import type { WebhookEvent } from '../types/webhook';
 
 export class MoodleEventHandlers {
-	constructor(private moodleClient: MoodleClient) {}
+	constructor(
+		private moodleClient: MoodleClient,
+		private serviceClient: ServiceClient,
+	) {}
 
 	// TODO: create-user event implements
 	userCreated: EventHandler = async (event: WebhookEvent) => {
@@ -19,7 +23,7 @@ export class MoodleEventHandlers {
 			//* Integração com serviços externos
 			await Promise.all([
 				this.sendWelcomeEmail(user),
-				this.createUserProfile(user),
+				this.serviceClient.createUserProfile(user),
 				this.notifyAdmins(user),
 			]);
 		} catch (error) {
@@ -70,11 +74,6 @@ export class MoodleEventHandlers {
 	private async sendWelcomeEmail(user: unknown): Promise<void> {
 		console.log(`Email de boas-vindas enviado para ${JSON.stringify(user)}`);
 		//TODO: Implementar integração com SendGrid, AWS SES, etc.
-	}
-
-	private async createUserProfile(user: unknown): Promise<void> {
-		console.log(`Perfil criado para ${JSON.stringify(user)}`);
-		//TODO: Criar perfil em sistema externo
 	}
 
 	private async notifyAdmins(user: unknown): Promise<void> {

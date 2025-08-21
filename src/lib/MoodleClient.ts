@@ -46,7 +46,10 @@ export class MoodleClient {
 				...this.flattenParams(params),
 			});
 
-			const response: AxiosResponse<T> = await this.client.post('', data);
+			const response: AxiosResponse<T> = await this.client.post(
+				'',
+				data.toString(),
+			);
 
 			if (this.isErrorResponse(response.data)) {
 				// Tratar diferentes tipos de erro do Moodle
