@@ -12,20 +12,15 @@ export class MoodleEventHandlers {
 		private serviceClient: ServiceClient,
 	) {}
 
-	// TODO: create-user event implements
 	userCreated: EventHandler = async (event: WebhookEvent) => {
 		console.log(`Novo usuário criado: ID ${event.objectid}`);
 
 		try {
+			//* Buscar os dados do usuario criado no Moodle
 			const user = await this.moodleClient.getUserById(event.objectid);
-			console.log(`Processando boas-vindas para ${user.email}`);
 
 			//* Integração com serviços externos
-			await Promise.all([
-				this.sendWelcomeEmail(user),
-				this.serviceClient.createUserProfile(user),
-				this.notifyAdmins(user),
-			]);
+			await this.serviceClient.createUserProfile(user);
 		} catch (error) {
 			throw new EventHandlerExecutionError(
 				'user_created',
@@ -70,17 +65,6 @@ export class MoodleEventHandlers {
 			);
 		}
 	};
-
-	private async sendWelcomeEmail(user: unknown): Promise<void> {
-		console.log(`Email de boas-vindas enviado para ${JSON.stringify(user)}`);
-		//TODO: Implementar integração com SendGrid, AWS SES, etc.
-	}
-
-	private async notifyAdmins(user: unknown): Promise<void> {
-		console.log(
-			`Admins notificados sobre novo usuário: ${JSON.stringify(user)}`,
-		);
-	}
 
 	// private async syncToExternalSystem(
 	// 	_user: unknown,

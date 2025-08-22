@@ -7,6 +7,7 @@ import {
 	MoodleResourceNotFoundError,
 	MoodleTimeoutError,
 } from '../errors';
+import { CircuitBreaker } from '../services/CircuitBreaker';
 import type {
 	MoodleConfig,
 	MoodleCourse,
@@ -17,12 +18,20 @@ import type {
 export class MoodleClient {
 	private client: AxiosInstance;
 	private config: MoodleConfig;
+	private circuitBreaker: CircuitBreaker;
 
 	constructor(config: MoodleConfig) {
 		this.config = {
 			service: 'microcredenciais',
 			...config,
 		};
+
+		this.circuitBreaker = new CircuitBreaker({
+			failureThreshold: 5,
+			resetTimeout: 30000,
+			monitoringPeriod: 60000,
+			expectedErrors: [MoodleAuthenticationError],
+		});
 
 		this.client = axios.create({
 			baseURL: `${this.config.baseUrl}/webservice/rest/server.php`,
@@ -38,115 +47,121 @@ export class MoodleClient {
 		// biome-ignore lint/suspicious/noExplicitAny: <any>
 		params: Record<string, any> = {},
 	): Promise<T> {
-		try {
-			const data = new URLSearchParams({
-				wstoken: this.config.token,
-				wsfunction,
-				moodlewsrestformat: 'json',
-				...this.flattenParams(params),
-			});
+		return this.circuitBreaker.execute(async () => {
+			try {
+				const data = new URLSearchParams({
+					wstoken: this.config.token,
+					wsfunction,
+					moodlewsrestformat: 'json',
+					...this.flattenParams(params),
+				});
 
-			const response: AxiosResponse<T> = await this.client.post(
-				'',
-				data.toString(),
-			);
-
-			if (this.isErrorResponse(response.data)) {
-				// Tratar diferentes tipos de erro do Moodle
-				const errorData = response.data as MoodleResponse;
-
-				if (
-					errorData.errorcode === 'invalidtoken' ||
-					errorData.errorcode === 'accessdenied'
-				) {
-					throw new MoodleAuthenticationError(
-						errorData.message || 'Token de autenticação inválido',
-						{ wsfunction, errorCode: errorData.errorcode },
-					);
-				}
-
-				if (errorData.errorcode === 'invalidparameter') {
-					throw new MoodleInvalidParametersError(Object.keys(params), {
-						wsfunction,
-						message: errorData.message,
-					});
-				}
-
-				throw new MoodleInvalidResponseError(
-					errorData.message ||
-						errorData.exception ||
-						'Resposta inválida da API do Moodle',
-					{
-						wsfunction,
-						errorCode: errorData.errorcode,
-						debugInfo: errorData.debuginfo,
-					},
+				const response: AxiosResponse<T> = await this.client.post(
+					'',
+					data.toString(),
 				);
-			}
 
-			return response.data;
-		} catch (error) {
-			if (axios.isAxiosError(error)) {
-				// Tratar diferentes tipos de erro HTTP
-				if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-					throw new MoodleConnectionError(
-						'Não foi possível conectar ao servidor Moodle',
+				if (this.isErrorResponse(response.data)) {
+					// Tratar diferentes tipos de erro do Moodle
+					const errorData = response.data as MoodleResponse;
+
+					if (
+						errorData.errorcode === 'invalidtoken' ||
+						errorData.errorcode === 'accessdenied'
+					) {
+						throw new MoodleAuthenticationError(
+							errorData.message || 'Token de autenticação inválido',
+							{ wsfunction, errorCode: errorData.errorcode },
+						);
+					}
+
+					if (errorData.errorcode === 'invalidparameter') {
+						throw new MoodleInvalidParametersError(Object.keys(params), {
+							wsfunction,
+							message: errorData.message,
+						});
+					}
+
+					throw new MoodleInvalidResponseError(
+						errorData.message ||
+							errorData.exception ||
+							'Resposta inválida da API do Moodle',
 						{
 							wsfunction,
-							baseUrl: this.config.baseUrl,
-							errorCode: error.code,
+							errorCode: errorData.errorcode,
+							debugInfo: errorData.debuginfo,
 						},
 					);
 				}
 
-				if (
-					error.code === 'ECONNABORTED' ||
-					error.message.includes('timeout')
-				) {
-					throw new MoodleTimeoutError(
-						30000, // timeout padrão
-						{ wsfunction, baseUrl: this.config.baseUrl },
-					);
-				}
+				return response.data;
+			} catch (error) {
+				if (axios.isAxiosError(error)) {
+					// Tratar diferentes tipos de erro HTTP
+					if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+						throw new MoodleConnectionError(
+							'Não foi possível conectar ao servidor Moodle',
+							{
+								wsfunction,
+								baseUrl: this.config.baseUrl,
+								errorCode: error.code,
+							},
+						);
+					}
 
-				if (error.response?.status === 401) {
-					throw new MoodleAuthenticationError('Credenciais inválidas', {
+					if (
+						error.code === 'ECONNABORTED' ||
+						error.message.includes('timeout')
+					) {
+						throw new MoodleTimeoutError(
+							30000, // timeout padrão
+							{ wsfunction, baseUrl: this.config.baseUrl },
+						);
+					}
+
+					if (error.response?.status === 401) {
+						throw new MoodleAuthenticationError('Credenciais inválidas', {
+							wsfunction,
+							status: error.response.status,
+						});
+					}
+
+					if (error.response?.status === 404) {
+						throw new MoodleResourceNotFoundError('endpoint', wsfunction, {
+							baseUrl: this.config.baseUrl,
+						});
+					}
+
+					throw new MoodleConnectionError(`Erro HTTP: ${error.message}`, {
 						wsfunction,
-						status: error.response.status,
+						status: error.response?.status,
+						statusText: error.response?.statusText,
 					});
 				}
 
-				if (error.response?.status === 404) {
-					throw new MoodleResourceNotFoundError('endpoint', wsfunction, {
-						baseUrl: this.config.baseUrl,
-					});
+				// Re-throw erros já tipados
+				if (
+					error instanceof MoodleAuthenticationError ||
+					error instanceof MoodleConnectionError ||
+					error instanceof MoodleInvalidResponseError ||
+					error instanceof MoodleResourceNotFoundError ||
+					error instanceof MoodleTimeoutError ||
+					error instanceof MoodleInvalidParametersError
+				) {
+					throw error;
 				}
 
-				throw new MoodleConnectionError(`Erro HTTP: ${error.message}`, {
-					wsfunction,
-					status: error.response?.status,
-					statusText: error.response?.statusText,
-				});
+				// Erro desconhecido
+				throw new MoodleInvalidResponseError(
+					`Erro desconhecido: ${error instanceof Error ? error.message : 'Unknown error'}`,
+					{ wsfunction, originalError: error },
+				);
 			}
+		});
+	}
 
-			// Re-throw erros já tipados
-			if (
-				error instanceof MoodleAuthenticationError ||
-				error instanceof MoodleConnectionError ||
-				error instanceof MoodleInvalidResponseError ||
-				error instanceof MoodleResourceNotFoundError ||
-				error instanceof MoodleTimeoutError ||
-				error instanceof MoodleInvalidParametersError
-			) {
-				throw error;
-			}
-
-			// Erro desconhecido
-			throw new MoodleInvalidResponseError(
-				`Erro desconhecido: ${error instanceof Error ? error.message : 'Unknown error'}`,
-				{ wsfunction, originalError: error },
-			);
-		}
+	getCircuitBreakerStats() {
+		return this.circuitBreaker.getStats();
 	}
 
 	private flattenParams(

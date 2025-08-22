@@ -27,9 +27,11 @@ export class ServiceClient {
 	 * @param data - Payload da requisição (opcional)
 	 * @param headers - Headers adicionais (opcional)
 	 */
-	private async makeRequest<T = any>(
+
+	private async makeRequest<T>(
 		method: 'get' | 'post' | 'put' | 'delete' | 'patch',
 		url: string,
+		// biome-ignore lint/suspicious/noExplicitAny: any data
 		data?: any,
 		headers?: Record<string, string>,
 	): Promise<AxiosResponse<T>> {

@@ -4,6 +4,7 @@ import {
 	MissingConfigurationError,
 } from '../errors';
 import type { ProcessingMode } from '../strategies/EventProcessingStrategyFactory';
+import { EventRegistry } from './EventRegistry';
 
 dotenv.config();
 
@@ -11,6 +12,8 @@ export interface AppConfig {
 	server: {
 		port: number;
 		host: string;
+		hookPath: string;
+		enabledEvents: string[];
 		rateLimit: {
 			windowMs: number;
 			max: number;
@@ -37,6 +40,9 @@ export interface AppConfig {
 	};
 	service: {
 		baseUrl: string;
+	};
+	redis: {
+		url: string;
 	};
 }
 
@@ -65,6 +71,8 @@ export class ConfigManager {
 			server: {
 				port: Number.parseInt(process.env.PORT || '3000'),
 				host: process.env.HOST || '0.0.0.0',
+				hookPath: process.env.WEBHOOK_PATH || '/webhook',
+				enabledEvents: EventRegistry.getInstance().getEnabledEvents(),
 				rateLimit: {
 					windowMs: Number.parseInt(
 						process.env.RATE_LIMIT_WINDOW_MS || '60000',
@@ -88,6 +96,9 @@ export class ConfigManager {
 			},
 			service: {
 				baseUrl: process.env.SERVICE_BASE_URL || 'http://localhost:3000',
+			},
+			redis: {
+				url: process.env.REDIS_URL || 'redis://localhost:6379',
 			},
 		};
 
@@ -171,5 +182,9 @@ export class ConfigManager {
 
 	getServerConfig() {
 		return this.config.server;
+	}
+
+	getRedisConfig() {
+		return this.config.redis;
 	}
 }

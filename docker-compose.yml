@@ -21,27 +21,39 @@ services:
     networks:
       - webhook-network
 
-  # Webhook service (opcional - para desenvolvimento)
-  webhook-service:
-    build: .
-    container_name: webhook-service
-    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
     ports:
-      - "3333:3333"
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
     environment:
-      - NODE_ENV=production
-      - WEBHOOK_PORT=3333
-      - WEBHOOK_HOST=0.0.0.0
-      - RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672
-      - RABBITMQ_EXCHANGE=webhook.events
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - webhook-network
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
 
 volumes:
+  redis_data:
   rabbitmq_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   webhook-network:
