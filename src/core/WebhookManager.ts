@@ -9,7 +9,8 @@ import { MoodleEventHandlers } from '../handlers/MoodleEventHandler';
 import type { HealthStatus, SystemHealth } from '../interfaces/IHealthCheck';
 import { MoodleClient } from '../lib/MoodleClient';
 import { ServiceClient } from '../lib/ServiceClient';
-import { HealthCheckService } from '../services/HealthCheckService';
+import { AlertService } from '../services/Alert';
+import { HealthCheckService } from '../services/HealthCheck';
 import { MemoryHealthCheck } from '../services/MemoryHealthCheck';
 import { MetricsCollector } from '../services/MetricsCollector';
 import { MoodleHealthCheck } from '../services/MoodleHealthCheck';
@@ -38,6 +39,7 @@ class WebhookManager {
 	private metricsCollector: MetricsCollector;
 	private healthCheckService: HealthCheckService;
 	private eventTracker: RedisEventTracker;
+	private alertService: AlertService;
 
 	constructor(moodleClient?: MoodleClient, eventQueue?: WebhookEventQueue) {
 		this.configManager = ConfigManager.getInstance();
@@ -70,6 +72,11 @@ class WebhookManager {
 			this.eventTracker,
 			this.metricsCollector,
 		);
+
+		this.alertService = new AlertService();
+
+		//! Configurar verificação periódica de alertas
+		this.setupAlertMonitoring();
 
 		this.setupHealthChecks(moodleClientInstance);
 
@@ -135,6 +142,26 @@ class WebhookManager {
 				});
 			}
 		}
+	}
+
+	private setupAlertMonitoring(): void {
+		setInterval(
+			async () => {
+				try {
+					const metrics = this.getMetrics();
+					const health = await this.getSystemHealth();
+
+					const newAlerts = this.alertService.checkAlerts(metrics, health);
+
+					if (newAlerts.length > 0) {
+						console.log(`🚨 Generated ${newAlerts.length} new alerts`);
+					}
+				} catch (error) {
+					console.error('Error during alert monitoring:', error);
+				}
+			},
+			2 * 60 * 1000,
+		); // 2 minutos
 	}
 
 	private createMockPayload(event: WebhookEvent): WebhookPayload {
@@ -233,45 +260,6 @@ class WebhookManager {
 		}
 	}
 
-	//! Endpoint de teste do webhook para testes manuais
-	async triggerTestEvent(eventType: string): Promise<void> {
-		const testEvent: WebhookEvent = {
-			eventname: eventType,
-			component: 'core',
-			action: 'test',
-			target: 'test_user',
-			objecttable: 'user',
-			objectid: 999,
-			crud: 'c',
-			edulevel: 2,
-			contextid: 1,
-			contextlevel: 10,
-			contextinstanceid: 0,
-			userid: 999,
-			courseid: 1,
-			anonymous: 0,
-			other: {},
-			timecreated: Math.floor(Date.now() / 1000),
-			host: '127.0.0.1',
-			token: 'test-token',
-			extra: 'test',
-		};
-
-		if (this.eventQueue) {
-			await this.eventQueue.publishEvent(testEvent);
-			console.log(`Test event ${eventType} published to RabbitMQ`);
-		} else {
-			const payload = this.createMockPayload(testEvent);
-			const handler = this.handlerMapper.getHandler(eventType);
-			if (handler) {
-				await handler(testEvent, payload);
-				console.log(`Test event ${eventType} processed locally`);
-			} else {
-				console.log(`No handler found for event ${eventType}`);
-			}
-		}
-	}
-
 	//* Obter estatísticas do webhook
 	async getStats(): Promise<{
 		serverStats: { uptime: number; timestamp: number };
@@ -291,10 +279,6 @@ class WebhookManager {
 		}
 
 		return { serverStats };
-	}
-
-	on(eventName: string, handler: EventHandler): void {
-		this.server.on(eventName, handler);
 	}
 
 	onAny(handler: (event: WebhookEvent, payload: WebhookPayload) => void): void {
@@ -345,14 +329,9 @@ class WebhookManager {
 	async getDetailedStats(): Promise<{
 		health: SystemHealth;
 		metrics: any;
-		eventTracker: {
-			recentEvents: number;
-			errorRate: number;
-		};
-		queueStats?: Record<
-			string,
-			{ messageCount: number; consumerCount: number }
-		>;
+		alerts: any;
+		eventTracker: any;
+		queueStats?: any;
 	}> {
 		const health = await this.getSystemHealth();
 		const metrics = this.getMetrics();
@@ -360,6 +339,10 @@ class WebhookManager {
 		const stats: any = {
 			health,
 			metrics,
+			alerts: {
+				active: this.getActiveAlerts(),
+				total: this.getAlertHistory().length,
+			},
 			eventTracker: {
 				recentEvents: metrics.totalEvents,
 				errorRate: 100 - metrics.successRate,
@@ -371,6 +354,18 @@ class WebhookManager {
 		}
 
 		return stats;
+	}
+
+	getActiveAlerts() {
+		return this.alertService.getActiveAlerts();
+	}
+
+	getAlertHistory(limit?: number) {
+		return this.alertService.getAlertHistory(limit);
+	}
+
+	clearAlert(alertId: string): boolean {
+		return this.alertService.clearAlert(alertId);
 	}
 }
 

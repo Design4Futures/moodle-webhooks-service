@@ -1,9 +1,11 @@
+import { ConfigManager } from '../config/ConfigManager';
 import type { HealthStatus, IHealthCheck } from '../interfaces/IHealthCheck';
 import type { WebhookEventQueue } from './WebhookEventQueue';
 
 export class RabbitMQHealthCheck implements IHealthCheck {
+	private config = ConfigManager.getInstance().getHealthCheckConfig();
 	name = 'rabbitmq-queue';
-	timeout = 5000;
+	timeout = this.config.timeout;
 
 	constructor(private eventQueue?: WebhookEventQueue) {}
 

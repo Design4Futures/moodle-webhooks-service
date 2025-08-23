@@ -1,9 +1,11 @@
+import { ConfigManager } from '../config/ConfigManager';
 import type { HealthStatus, IHealthCheck } from '../interfaces/IHealthCheck';
 import type { MoodleClient } from '../lib/MoodleClient';
 
 export class MoodleHealthCheck implements IHealthCheck {
+	private config = ConfigManager.getInstance().getHealthCheckConfig();
 	name = 'moodle-api';
-	timeout = 10000;
+	timeout = this.config.timeout;
 
 	constructor(private moodleClient: MoodleClient) {}
 

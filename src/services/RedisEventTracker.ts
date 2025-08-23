@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import Redis from 'ioredis';
+import { ConfigManager } from '../config/ConfigManager';
 import type {
 	EventMetadata,
 	IEventTracker,
@@ -8,15 +9,16 @@ import type {
 import type { WebhookEvent } from '../types/webhook';
 
 export class RedisEventTracker implements IEventTracker {
+	private config = ConfigManager.getInstance().getRedisConfig();
 	private redis: Redis;
-	private keyPrefix = 'webhook:events';
-	private lockPrefix = 'webhook:locks';
-	private defaultTTL = 24 * 60 * 60; //* 24 horas
+	private keyPrefix = this.config.keyPrefix;
+	private lockPrefix = this.config.lockPrefix;
+	private defaultTTL = this.config.defaultTtl;
 
 	constructor(redisUrl: string) {
 		this.redis = new Redis(redisUrl, {
 			lazyConnect: true,
-			maxRetriesPerRequest: 3,
+			maxRetriesPerRequest: this.config.maxRetries,
 		});
 	}
 

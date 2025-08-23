@@ -43,6 +43,31 @@ export interface AppConfig {
 	};
 	redis: {
 		url: string;
+		keyPrefix: string;
+		lockPrefix: string;
+		defaultTtl: number;
+		maxRetries: number;
+	};
+
+	circuitBreaker: {
+		failureThreshold: number;
+		resetTimeout: number;
+		monitoringPeriod: number;
+	};
+
+	healthCheck: {
+		timeout: number;
+		memoryLimitMB: number;
+	};
+
+	cleanup: {
+		eventTtlHours: number;
+		metricsResetHours: number;
+		cleanupIntervalMinutes: number;
+	};
+
+	alert: {
+		url: string;
 	};
 }
 
@@ -99,6 +124,41 @@ export class ConfigManager {
 			},
 			redis: {
 				url: process.env.REDIS_URL || 'redis://localhost:6379',
+				keyPrefix: process.env.REDIS_KEY_PREFIX || 'webhook:events',
+				lockPrefix: process.env.REDIS_LOCK_PREFIX || 'webhook:locks',
+				defaultTtl: Number.parseInt(process.env.REDIS_DEFAULT_TTL || '86400'), // 24h
+				maxRetries: Number.parseInt(process.env.REDIS_MAX_RETRIES || '3'),
+			},
+
+			circuitBreaker: {
+				failureThreshold: Number.parseInt(
+					process.env.CB_FAILURE_THRESHOLD || '5',
+				),
+				resetTimeout: Number.parseInt(process.env.CB_RESET_TIMEOUT || '30000'),
+				monitoringPeriod: Number.parseInt(
+					process.env.CB_MONITORING_PERIOD || '60000',
+				),
+			},
+
+			healthCheck: {
+				timeout: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT || '10000'),
+				memoryLimitMB: Number.parseInt(process.env.MEMORY_LIMIT_MB || '512'),
+			},
+
+			cleanup: {
+				eventTtlHours: Number.parseInt(process.env.EVENT_TTL_HOURS || '24'),
+				metricsResetHours: Number.parseInt(
+					process.env.METRICS_RESET_HOURS || '24',
+				),
+				cleanupIntervalMinutes: Number.parseInt(
+					process.env.CLEANUP_INTERVAL_MINUTES || '60',
+				),
+			},
+
+			alert: {
+				url:
+					process.env.ALERT_WEBHOOK_URL ||
+					'https://hooks.slack.com/services/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',
 			},
 		};
 
@@ -153,10 +213,6 @@ export class ConfigManager {
 		}
 	}
 
-	updateProcessingMode(mode: ProcessingMode): void {
-		this.config.processing.mode = mode;
-	}
-
 	isQueueEnabled(): boolean {
 		return (
 			this.config.processing.enableQueue && !!this.config.rabbitmq?.enabled
@@ -186,5 +242,21 @@ export class ConfigManager {
 
 	getRedisConfig() {
 		return this.config.redis;
+	}
+
+	getCircuitBreakerConfig() {
+		return this.config.circuitBreaker;
+	}
+
+	getHealthCheckConfig() {
+		return this.config.healthCheck;
+	}
+
+	getCleanupConfig() {
+		return this.config.cleanup;
+	}
+
+	getAlertConfig() {
+		return this.config.alert;
 	}
 }

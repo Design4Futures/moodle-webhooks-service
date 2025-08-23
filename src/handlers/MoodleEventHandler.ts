@@ -3,6 +3,7 @@
 import { EventHandlerExecutionError } from '../errors';
 import type { MoodleClient } from '../lib/MoodleClient';
 import type { ServiceClient } from '../lib/ServiceClient';
+import { executeWithRetry } from '../services/Retry';
 import type { EventHandler } from '../types/eventhandler';
 import type { WebhookEvent } from '../types/webhook';
 
@@ -13,23 +14,30 @@ export class MoodleEventHandlers {
 	) {}
 
 	userCreated: EventHandler = async (event: WebhookEvent) => {
-		console.log(`Novo usuário criado: ID ${event.objectid}`);
+		const result = await executeWithRetry(
+			async () => {
+				const user = await this.moodleClient.getUserById(event.objectid);
+				await this.serviceClient.createUserProfile(user);
+			},
+			{
+				maxAttempts: 3,
+				retryCondition: (error) =>
+					!error.message.includes('authentication') &&
+					!error.message.includes('not found'),
+			},
+		);
 
-		try {
-			//* Buscar os dados do usuario criado no Moodle
-			const user = await this.moodleClient.getUserById(event.objectid);
-
-			//* Integração com serviços externos
-			await this.serviceClient.createUserProfile(user);
-		} catch (error) {
+		if (!result.success) {
 			throw new EventHandlerExecutionError(
 				'user_created',
 				'MoodleEventHandlers.userCreated',
-				error instanceof Error ? error : new Error('Unknown error'),
+				result.error || new Error('Max retries exceeded'),
 				{
 					eventName: event.eventname,
 					userId: event.objectid,
 					timestamp: event.timecreated,
+					attempts: result.attempts,
+					totalTime: result.totalTime,
 				},
 			);
 		}
@@ -37,41 +45,44 @@ export class MoodleEventHandlers {
 
 	//TODO: course-completed implements
 	courseCompleted: EventHandler = async (event: WebhookEvent) => {
-		console.log(`Curso concluído pelo usuário ${event.userid}`);
+		const result = await executeWithRetry(
+			async () => {
+				console.log(`Curso concluído pelo usuário ${event.userid}`);
 
-		try {
-			const [user, course] = await Promise.all([
-				this.moodleClient.getUserById(event.userid),
-				this.moodleClient.getCourseById(event.courseid!),
-			]);
+				const [user, course] = await Promise.all([
+					this.moodleClient.getUserById(event.userid),
+					this.moodleClient.getCourseById(event.courseid!),
+				]);
 
-			//* Processar conclusão
-			await Promise.all([
-				this.generateCertificate(user, course),
-				this.updateExternalProgress(user, course, 'completed'),
-				this.triggerNextCourseRecommendation(user, course),
-			]);
-		} catch (error) {
+				await Promise.all([
+					this.generateCertificate(user, course),
+					this.updateExternalProgress(user, course, 'completed'),
+					this.triggerNextCourseRecommendation(user, course),
+				]);
+			},
+			{
+				maxAttempts: 5,
+				baseDelay: 2000,
+				retryCondition: (error) => !error.message.includes('authentication'),
+			},
+		);
+
+		if (!result.success) {
 			throw new EventHandlerExecutionError(
 				'course_completed',
 				'MoodleEventHandlers.courseCompleted',
-				error instanceof Error ? error : new Error('Unknown error'),
+				result.error || new Error('Max retries exceeded'),
 				{
 					eventName: event.eventname,
 					userId: event.userid,
 					courseId: event.courseid,
 					timestamp: event.timecreated,
+					attempts: result.attempts,
+					totalTime: result.totalTime,
 				},
 			);
 		}
 	};
-
-	// private async syncToExternalSystem(
-	// 	_user: unknown,
-	// 	_course: unknown,
-	// 	action: string,
-	// ): Promise<void> {
-	// }
 
 	private async generateCertificate(
 		user: unknown,

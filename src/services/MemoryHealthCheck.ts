@@ -1,9 +1,11 @@
+import { ConfigManager } from '../config/ConfigManager';
 import type { HealthStatus, IHealthCheck } from '../interfaces/IHealthCheck';
 
 export class MemoryHealthCheck implements IHealthCheck {
+	private config = ConfigManager.getInstance().getHealthCheckConfig();
 	name = 'memory-usage';
 
-	constructor(private maxMemoryMB: number = 512) {}
+	constructor(private maxMemoryMB: number = this.config.memoryLimitMB) {}
 
 	async check(): Promise<HealthStatus> {
 		const memUsage = process.memoryUsage();

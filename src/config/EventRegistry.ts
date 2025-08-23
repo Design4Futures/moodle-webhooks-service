@@ -65,10 +65,6 @@ export class EventRegistry {
 		return Array.from(this.events.values());
 	}
 
-	getEventNames(): string[] {
-		return Array.from(this.events.keys());
-	}
-
 	getSupportedEventNames(): MoodleEventType[] {
 		return Object.values(MOODLE_EVENTS);
 	}

@@ -226,7 +226,6 @@ export class MoodleWebhookServer {
 		this.server.get('/health', async (_request, _reply) => {
 			const uptime = Date.now() - this.startTime;
 			const summary = this.metricsCollector.getMetricsSummary();
-
 			return {
 				status: 'healthy',
 				timestamp: new Date().toISOString(),

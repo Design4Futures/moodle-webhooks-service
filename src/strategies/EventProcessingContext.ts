@@ -8,10 +8,6 @@ export class EventProcessingContext {
 		this.strategy = strategy;
 	}
 
-	setStrategy(strategy: IEventProcessingStrategy): void {
-		this.strategy = strategy;
-	}
-
 	async processEvent(
 		event: WebhookEvent,
 		payload?: WebhookPayload,
