@@ -12,13 +12,13 @@ export type ProcessingMode = 'direct' | 'queue' | 'hybrid';
 
 export function createProcessingStrategy(
 	mode: ProcessingMode,
-	handlerMapper: IEventHandlerMapper, // Alterado de handlerMap para handlerMapper
+	handlerMapper: IEventHandlerMapper,
 	eventQueue?: IEventQueue,
 ): EventProcessingContext {
 	switch (mode) {
 		case 'direct':
 			return new EventProcessingContext(
-				new DirectProcessingStrategy(handlerMapper), // Passa o mapper diretamente
+				new DirectProcessingStrategy(handlerMapper),
 			);
 
 		case 'queue':
@@ -38,7 +38,7 @@ export function createProcessingStrategy(
 
 		case 'hybrid':
 			return new EventProcessingContext(
-				new HybridProcessingStrategy(handlerMapper, eventQueue), // Passa o mapper diretamente
+				new HybridProcessingStrategy(handlerMapper, eventQueue),
 			);
 
 		default:
