@@ -23,7 +23,6 @@ import {
 	createProcessingStrategy,
 	getRecommendedProcessingMode,
 } from '../strategies/EventProcessingStrategyFactory';
-import type { EventHandler } from '../types/eventhandler';
 import type { WebhookEvent, WebhookPayload } from '../types/webhook';
 import { MoodleWebhookServer } from './MoodleWebhookServer';
 
@@ -90,12 +89,6 @@ class WebhookManager {
 	}
 
 	private setupProcessingStrategy(): void {
-		//! Criar mapa de handlers para estratégias
-		const handlerMap = new Map();
-		this.handlerMapper.getAllHandlers().forEach(({ eventName, handler }) => {
-			handlerMap.set(eventName, handler);
-		});
-
 		//! Usar factory para criar a estratégia recomendada
 		const mode = getRecommendedProcessingMode(
 			!!this.eventQueue,
@@ -103,7 +96,7 @@ class WebhookManager {
 		);
 		this.processingContext = createProcessingStrategy(
 			mode,
-			handlerMap,
+			this.handlerMapper,
 			this.eventQueue,
 		);
 	}

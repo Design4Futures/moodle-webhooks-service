@@ -226,7 +226,7 @@ export class MoodleClient {
 		}
 	}
 
-	async getCourseById(id: number): Promise<MoodleCourse> {
+	async getCourseById(id: number | string): Promise<MoodleCourse> {
 		try {
 			const response = await this.makeRequest<{ courses: MoodleCourse[] }>(
 				'core_course_get_courses_by_field',

@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { AlertService } from '../../services/Alert';
 import { BaseError } from '../base/BaseError';
 import type { ErrorHandlerConfig } from './types';
 
@@ -8,9 +9,11 @@ import type { ErrorHandlerConfig } from './types';
 export class ErrorHandler {
 	private config: ErrorHandlerConfig;
 	private errorCounts: Map<string, number> = new Map();
+	private alertService: AlertService | undefined;
 
-	constructor(config: ErrorHandlerConfig) {
+	constructor(config: ErrorHandlerConfig, alertService?: AlertService) {
 		this.config = config;
+		this.alertService = alertService;
 	}
 
 	handleError(error: Error, context?: Record<string, unknown>): void {
@@ -151,7 +154,21 @@ export class ErrorHandler {
 			},
 		);
 
-		process.exit(1);
+		this.alertService?.checkAlerts(
+			{},
+			{
+				status: 'DOWN',
+				components: {
+					criticalError: {
+						status: 'DOWN',
+						error: error.message,
+						timestamp: new Date(),
+					},
+				},
+				timestamp: new Date().toLocaleDateString(),
+				uptime: 0,
+			},
+		);
 	}
 
 	getErrorMetrics(): Record<string, number> | null {

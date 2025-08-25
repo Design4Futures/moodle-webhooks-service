@@ -1,18 +1,18 @@
 import type {
-	IEventHandler,
+	IEventHandlerMapper,
 	IEventProcessingStrategy,
 } from '../interfaces/EventInterfaces';
 import type { WebhookEvent, WebhookPayload } from '../types/webhook';
 
 export class DirectProcessingStrategy implements IEventProcessingStrategy {
-	private handlerMapper: Map<string, IEventHandler>;
+	private handlerMapper: IEventHandlerMapper;
 
-	constructor(handlerMapper: Map<string, IEventHandler>) {
+	constructor(handlerMapper: IEventHandlerMapper) {
 		this.handlerMapper = handlerMapper;
 	}
 
 	async process(event: WebhookEvent, payload?: WebhookPayload): Promise<void> {
-		const handler = this.handlerMapper.get(event.eventname);
+		const handler = this.handlerMapper.getHandler(event.eventname);
 		if (handler && payload) {
 			await handler(event, payload);
 			console.log(`Evento ${event.eventname} processado diretamente`);
@@ -38,6 +38,6 @@ export class DirectProcessingStrategy implements IEventProcessingStrategy {
 	}
 
 	shouldProcess(event: WebhookEvent): boolean {
-		return this.handlerMapper.has(event.eventname);
+		return this.handlerMapper.hasHandler(event.eventname);
 	}
 }

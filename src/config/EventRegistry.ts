@@ -10,6 +10,7 @@ export interface EventConfig {
 
 export const MOODLE_EVENTS = {
 	USER_CREATED: '\\core\\event\\user_created',
+	COURSE_CREATED: '\\core\\event\\course_created',
 	COURSE_COMPLETED: '\\core\\event\\course_completed',
 } as const;
 
@@ -40,6 +41,16 @@ export class EventRegistry {
 			retries: 3,
 			ttl: 300000, //* 5 minutes
 			description: 'User creation events',
+		});
+
+		this.registerEvent({
+			eventName: MOODLE_EVENTS.COURSE_CREATED,
+			queueName: 'webhook.course.created',
+			routingKey: 'course.created',
+			priority: 8,
+			retries: 5,
+			ttl: 600000, //* 10 minutes
+			description: 'Course created events',
 		});
 
 		this.registerEvent({

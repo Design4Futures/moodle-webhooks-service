@@ -1,10 +1,13 @@
 import axios, { type AxiosInstance, type AxiosResponse } from 'axios';
 import type { AppConfig } from '../config/ConfigManager';
+import { CircuitBreaker } from '../services/CircuitBreaker';
 import type { MoodleUser } from '../types/moodle';
+import type { WebhookEvent } from '../types/webhook';
 
 export class ServiceClient {
 	private client: AxiosInstance;
 	private config: AppConfig;
+	private circuitBreaker: CircuitBreaker;
 
 	constructor(config: AppConfig) {
 		this.config = {
@@ -17,6 +20,12 @@ export class ServiceClient {
 			headers: {
 				'Content-Type': 'application/json',
 			},
+		});
+
+		this.circuitBreaker = new CircuitBreaker({
+			failureThreshold: 5,
+			resetTimeout: 30000,
+			monitoringPeriod: 60000,
 		});
 	}
 
@@ -35,14 +44,16 @@ export class ServiceClient {
 		data?: any,
 		headers?: Record<string, string>,
 	): Promise<AxiosResponse<T>> {
-		const requestConfig = {
-			method,
-			url,
-			data,
-			...(headers ? { headers } : {}),
-		};
+		return this.circuitBreaker.execute(async () => {
+			const requestConfig = {
+				method,
+				url,
+				data,
+				...(headers ? { headers } : {}),
+			};
 
-		return this.client.request<T>(requestConfig);
+			return this.client.request<T>(requestConfig);
+		});
 	}
 
 	public async createUserProfile(user: MoodleUser): Promise<void> {
@@ -53,5 +64,14 @@ export class ServiceClient {
 			image: user.profileimageurl,
 		};
 		await this.makeRequest('post', '/api/v1/users', data);
+	}
+
+	public async createCourseProfile(course: WebhookEvent): Promise<void> {
+		const data = {
+			externalCourseId: course.objectid,
+			title: course.other?.shortname,
+			description: course.other?.fullname,
+		};
+		await this.makeRequest('post', '/api/v1/courses', data);
 	}
 }

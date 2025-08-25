@@ -1,5 +1,8 @@
 import { InvalidConfigurationError } from '../errors';
-import type { IEventHandler, IEventQueue } from '../interfaces/EventInterfaces';
+import type {
+	IEventHandlerMapper,
+	IEventQueue,
+} from '../interfaces/EventInterfaces'; // Alterado
 import { DirectProcessingStrategy } from './DirectProcessingStrategy';
 import { EventProcessingContext } from './EventProcessingContext';
 import { HybridProcessingStrategy } from './HybridProcessingStrategy';
@@ -9,13 +12,13 @@ export type ProcessingMode = 'direct' | 'queue' | 'hybrid';
 
 export function createProcessingStrategy(
 	mode: ProcessingMode,
-	handlerMap: Map<string, IEventHandler>,
+	handlerMapper: IEventHandlerMapper, // Alterado de handlerMap para handlerMapper
 	eventQueue?: IEventQueue,
 ): EventProcessingContext {
 	switch (mode) {
 		case 'direct':
 			return new EventProcessingContext(
-				new DirectProcessingStrategy(handlerMap),
+				new DirectProcessingStrategy(handlerMapper), // Passa o mapper diretamente
 			);
 
 		case 'queue':
@@ -35,7 +38,7 @@ export function createProcessingStrategy(
 
 		case 'hybrid':
 			return new EventProcessingContext(
-				new HybridProcessingStrategy(handlerMap, eventQueue),
+				new HybridProcessingStrategy(handlerMapper, eventQueue), // Passa o mapper diretamente
 			);
 
 		default:

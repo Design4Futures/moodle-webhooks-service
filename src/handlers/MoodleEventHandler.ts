@@ -43,6 +43,33 @@ export class MoodleEventHandlers {
 		}
 	};
 
+	courseCreated: EventHandler = async (event: WebhookEvent) => {
+		const result = await executeWithRetry(
+			async () => {
+				await this.serviceClient.createCourseProfile(event);
+			},
+			{
+				maxAttempts: 3,
+				baseDelay: 2000,
+				retryCondition: (error) => !error.message.includes('authentication'),
+			},
+		);
+		if (!result.success) {
+			throw new EventHandlerExecutionError(
+				'course_created',
+				'MoodleEventHandlers.courseCreated',
+				result.error || new Error('Max retries exceeded'),
+				{
+					eventName: event.eventname,
+					courseId: event.objectid,
+					timestamp: event.timecreated,
+					attempts: result.attempts,
+					totalTime: result.totalTime,
+				},
+			);
+		}
+	};
+
 	//TODO: course-completed implements
 	courseCompleted: EventHandler = async (event: WebhookEvent) => {
 		const result = await executeWithRetry(
