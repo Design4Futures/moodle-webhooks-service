@@ -266,38 +266,29 @@ export class MoodleWebhookServer {
 				return;
 			}
 
-			//! Enviar para RabbitMQ se disponível e configurado
-			if (this.eventQueue?.isConnected) {
-				try {
-					await this.eventQueue.publishEvent(event);
-					this.server.log.info(`Event ${eventId} sent to queue`);
-				} catch (queueError) {
-					this.server.log.warn(
-						`Failed to send event ${eventId} to queue:`,
-						queueError,
-					);
-				}
-			}
-
-			//! Processar handlers diretos
+			//! Processar handlers (os handlers registrados serão responsáveis
+			//! por decidir se processam localmente ou enfileiram)
 			await this.processEventHandlers(event);
 
-			this.server.log.info(`Event ${eventId} processed successfully`);
+			this.server.log.info(`Event ${eventId} handlers invoked`);
 
-			//! Registrar sucesso e marcar como processado
-			const processingTime = Date.now() - startTime;
-			this.metricsCollector.recordEventProcessed(
-				event.eventname,
-				processingTime,
-			);
+			// Registrar sucesso e marcar como processado apenas se não estivermos
+			// enviando o evento para uma fila (ou seja, processamento direto)
+			if (!this.eventQueue?.isConnected) {
+				const processingTime = Date.now() - startTime;
+				this.metricsCollector.recordEventProcessed(
+					event.eventname,
+					processingTime,
+				);
 
-			await this.eventTracker.markAsProcessed(eventId, {
-				processedAt: new Date(),
-				processingTimeMs: processingTime,
-				strategy: this.eventQueue?.isConnected ? 'hybrid' : 'direct',
-				eventType: event.eventname,
-				userId: event.userid,
-			});
+				await this.eventTracker.markAsProcessed(eventId, {
+					processedAt: new Date(),
+					processingTimeMs: processingTime,
+					strategy: 'direct',
+					eventType: event.eventname,
+					userId: event.userid,
+				});
+			}
 		} catch (error) {
 			//! Registrar falha
 			this.metricsCollector.recordEventFailed(

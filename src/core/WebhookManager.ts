@@ -10,6 +10,7 @@ import type { HealthStatus, SystemHealth } from '../interfaces/IHealthCheck';
 import { MoodleClient } from '../lib/MoodleClient';
 import { ServiceClient } from '../lib/ServiceClient';
 import { AlertService } from '../services/Alert';
+import { startConsumers } from '../services/ConsumerManager';
 import { HealthCheckService } from '../services/HealthCheck';
 import { MemoryHealthCheck } from '../services/MemoryHealthCheck';
 import { MetricsCollector } from '../services/MetricsCollector';
@@ -78,10 +79,6 @@ class WebhookManager {
 		this.setupAlertMonitoring();
 
 		this.setupHealthChecks(moodleClientInstance);
-
-		this.setupProcessingStrategy();
-		this.setupEventHandlers();
-		this.setupEventConsumers();
 	}
 
 	public getErrorHandler(): ErrorHandler {
@@ -121,22 +118,6 @@ class WebhookManager {
 		});
 	}
 
-	private async setupEventConsumers(): Promise<void> {
-		if (!this.eventQueue?.isConnected) return;
-
-		//! Configurar consumers para processar eventos das filas
-		const supportedEvents = this.handlerMapper.getSupportedEvents();
-
-		for (const eventName of supportedEvents) {
-			const handler = this.handlerMapper.getHandler(eventName);
-			if (handler) {
-				await this.eventQueue.consumeEvents(eventName, async (event) => {
-					await handler(event, this.createMockPayload(event));
-				});
-			}
-		}
-	}
-
 	private setupAlertMonitoring(): void {
 		setInterval(
 			async () => {
@@ -155,19 +136,6 @@ class WebhookManager {
 			},
 			2 * 60 * 1000,
 		); // 2 minutos
-	}
-
-	private createMockPayload(event: WebhookEvent): WebhookPayload {
-		return {
-			token: event.token || 'test-token',
-			events: [event],
-			site: {
-				id: '1',
-				url: 'https://test-moodle.com',
-				name: 'Test Moodle',
-				version: '4.0',
-			},
-		};
 	}
 
 	private async saveEventForAnalytics(
@@ -211,6 +179,18 @@ class WebhookManager {
 			// Iniciar servidor
 			console.log('🌐 Starting webhook server...');
 			await this.server.start();
+
+			// Now that the server and optional queue are initialized, set up
+			// processing strategy, register handlers and start consumers.
+			this.setupProcessingStrategy();
+			this.setupEventHandlers();
+			if (this.eventQueue) {
+				await startConsumers(
+					this.eventQueue,
+					this.handlerMapper,
+					this.eventTracker,
+				);
+			}
 
 			// Verificar health inicial
 			console.log('🏥 Checking system health...');

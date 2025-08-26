@@ -12,9 +12,9 @@ export class QueueProcessingStrategy implements IEventProcessingStrategy {
 		this.eventQueue = eventQueue;
 	}
 
-	async process(event: WebhookEvent, _payload?: WebhookPayload): Promise<void> {
+	async process(event: WebhookEvent, payload?: WebhookPayload): Promise<void> {
 		if (this.eventQueue?.isConnected) {
-			await this.eventQueue.publishEvent(event);
+			await this.eventQueue.publishEvent(event, payload);
 			console.log(
 				`Evento ${event.eventname} enviado para fila de processamento`,
 			);

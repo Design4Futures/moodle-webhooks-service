@@ -155,6 +155,7 @@ export class RabbitMQService {
 			exclusive?: boolean;
 			autoDelete?: boolean;
 			deadLetterExchange?: string;
+			deadLetterRoutingKey?: string;
 			messageTtl?: number;
 		} = {},
 	): Promise<void> {
@@ -171,8 +172,12 @@ export class RabbitMQService {
 				exclusive: false,
 				autoDelete: false,
 				arguments: {
-					'x-dead-letter-exchange':
-						options.deadLetterExchange || `${this.config.exchangeName}.dlx`,
+					...(options.deadLetterExchange && {
+						'x-dead-letter-exchange': options.deadLetterExchange,
+					}),
+					...(options.deadLetterRoutingKey && {
+						'x-dead-letter-routing-key': options.deadLetterRoutingKey,
+					}),
 					...(options.messageTtl && { 'x-message-ttl': options.messageTtl }),
 				},
 				...options,
@@ -224,6 +229,9 @@ export class RabbitMQService {
 
 					if (!options.noAck && this.channel) {
 						this.channel.ack(msg);
+						console.log(
+							`Message acked (queue: ${queueName}, messageId: ${msg.properties?.messageId})`,
+						);
 					}
 				} catch (error) {
 					console.error(
@@ -231,9 +239,53 @@ export class RabbitMQService {
 						error,
 					);
 
-					// Rejeita a mensagem e envia para dead letter queue
-					if (!options.noAck && this.channel) {
-						this.channel.nack(msg, false, false);
+					const headers = msg.properties?.headers || {};
+					const retryCount = Number(headers.retryCount || 0);
+					const maxRetries = Number(headers.maxRetries || 2);
+					const routingKey = msg.fields?.routingKey || '';
+
+					if (retryCount < maxRetries && this.channel) {
+						try {
+							const retryRoutingKey = `${routingKey}.retry`;
+							const backoff = 2 ** retryCount * 1000;
+
+							this.channel.publish(
+								this.config.exchangeName,
+								retryRoutingKey,
+								msg.content,
+								{
+									persistent: true,
+									contentType: 'application/json',
+									timestamp: Date.now(),
+									messageId:
+										msg.properties?.messageId || this.generateMessageId(),
+									expiration: backoff.toString(),
+									headers: {
+										...(headers || {}),
+										retryCount: retryCount + 1,
+										maxRetries,
+									},
+								},
+							);
+
+							this.channel.ack(msg);
+							console.log(
+								`Message scheduled for retry ${retryCount + 1}/${maxRetries} (original routingKey: ${routingKey}, retryRoutingKey: ${retryRoutingKey}, messageId: ${msg.properties?.messageId})`,
+							);
+						} catch (pubErr) {
+							console.error('Failed to publish retry message:', pubErr);
+							if (!options.noAck && this.channel) {
+								this.channel.nack(msg, false, false);
+							}
+						}
+					} else {
+						// No more retries: send to dead-letter (nack without requeue)
+						if (!options.noAck && this.channel) {
+							this.channel.nack(msg, false, false);
+							console.log(
+								`Message nacked to DLX (queue: ${queueName}, messageId: ${msg.properties?.messageId})`,
+							);
+						}
 					}
 				}
 			},
@@ -316,5 +368,9 @@ export class RabbitMQService {
 
 	get connected(): boolean {
 		return this.isConnected;
+	}
+
+	get exchangeName(): string {
+		return this.config.exchangeName;
 	}
 }
