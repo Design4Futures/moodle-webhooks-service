@@ -4,20 +4,27 @@ import dotenv from 'dotenv';
 import { ConfigManager } from '../config/ConfigManager';
 import { EventHandlerMapper } from '../config/EventHandlerMapper';
 import { EventRegistry } from '../config/EventRegistry';
+import { type ErrorHandler, initializeErrorHandling } from '../errors';
 import { MoodleEventHandlers } from '../handlers/MoodleEventHandler';
+import type { HealthStatus, SystemHealth } from '../interfaces/IHealthCheck';
 import { MoodleClient } from '../lib/MoodleClient';
+import { ServiceClient } from '../lib/ServiceClient';
+import { AlertService } from '../services/Alert';
+import { startConsumers } from '../services/ConsumerManager';
+import { HealthCheckService } from '../services/HealthCheck';
+import { MemoryHealthCheck } from '../services/MemoryHealthCheck';
+import { MetricsCollector } from '../services/MetricsCollector';
+import { MoodleHealthCheck } from '../services/MoodleHealthCheck';
+import { RabbitMQHealthCheck } from '../services/RabbitMQHealthCheck';
+import { RedisEventTracker } from '../services/RedisEventTracker';
+import { RedisHealthCheck } from '../services/RedisHealthCheck';
 import { WebhookEventQueue } from '../services/WebhookEventQueue';
 import type { EventProcessingContext } from '../strategies/EventProcessingStrategy';
 import {
 	createProcessingStrategy,
 	getRecommendedProcessingMode,
 } from '../strategies/EventProcessingStrategyFactory';
-import type { EventHandler } from '../types/eventhandler';
-import type {
-	WebhookConfig,
-	WebhookEvent,
-	WebhookPayload,
-} from '../types/webhook';
+import type { WebhookEvent, WebhookPayload } from '../types/webhook';
 import { MoodleWebhookServer } from './MoodleWebhookServer';
 
 class WebhookManager {
@@ -28,47 +35,57 @@ class WebhookManager {
 	private eventRegistry: EventRegistry;
 	private processingContext!: EventProcessingContext;
 	private configManager: ConfigManager;
+	private errorHandler: ErrorHandler;
+	private metricsCollector: MetricsCollector;
+	private healthCheckService: HealthCheckService;
+	private eventTracker: RedisEventTracker;
+	private alertService: AlertService;
 
 	constructor(moodleClient?: MoodleClient, eventQueue?: WebhookEventQueue) {
 		this.configManager = ConfigManager.getInstance();
 		const config = this.configManager.getConfig();
+		this.errorHandler = initializeErrorHandling();
 
-		//! Criar configuração do webhook a partir do ConfigManager
-		const webhookConfig: WebhookConfig = {
-			host: config.server.host,
-			port: config.server.port,
-			path: process.env.WEBHOOK_PATH || '/webhook',
-			secret: process.env.MOODLE_TOKEN || 'default-secret',
-			moodleUrl: config.moodle.baseUrl,
-			enabledEvents: EventRegistry.getInstance().getEnabledEvents(),
-			rateLimiting: {
-				max: config.server.rateLimit.max,
-				timeWindow: config.server.rateLimit.windowMs,
-			},
-		};
+		this.metricsCollector = new MetricsCollector();
+		this.healthCheckService = new HealthCheckService();
+
+		const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+		this.eventTracker = new RedisEventTracker(redisUrl);
 
 		this.eventQueue = eventQueue;
-		this.server = new MoodleWebhookServer(webhookConfig, eventQueue);
 
 		const moodleClientInstance =
 			moodleClient || new MoodleClient(config.moodle);
-		this.handlers = new MoodleEventHandlers(moodleClientInstance);
+		const serviceClientInstance = new ServiceClient(config);
+
+		this.handlers = new MoodleEventHandlers(
+			moodleClientInstance,
+			serviceClientInstance,
+		);
 
 		this.handlerMapper = new EventHandlerMapper(this.handlers);
 		this.eventRegistry = EventRegistry.getInstance();
 
-		this.setupProcessingStrategy();
-		this.setupEventHandlers();
-		this.setupEventConsumers();
+		this.server = new MoodleWebhookServer(
+			config,
+			eventQueue,
+			this.eventTracker,
+			this.metricsCollector,
+		);
+
+		this.alertService = new AlertService();
+
+		//! Configurar verificação periódica de alertas
+		this.setupAlertMonitoring();
+
+		this.setupHealthChecks(moodleClientInstance);
+	}
+
+	public getErrorHandler(): ErrorHandler {
+		return this.errorHandler;
 	}
 
 	private setupProcessingStrategy(): void {
-		//! Criar mapa de handlers para estratégias
-		const handlerMap = new Map();
-		this.handlerMapper.getAllHandlers().forEach(({ eventName, handler }) => {
-			handlerMap.set(eventName, handler);
-		});
-
 		//! Usar factory para criar a estratégia recomendada
 		const mode = getRecommendedProcessingMode(
 			!!this.eventQueue,
@@ -76,7 +93,7 @@ class WebhookManager {
 		);
 		this.processingContext = createProcessingStrategy(
 			mode,
-			handlerMap,
+			this.handlerMapper,
 			this.eventQueue,
 		);
 	}
@@ -101,36 +118,24 @@ class WebhookManager {
 		});
 	}
 
-	private async setupEventConsumers(): Promise<void> {
-		if (!this.eventQueue?.isConnected) {
-			console.log('RabbitMQ is not connected, skipping consumers setup');
-			return;
-		}
+	private setupAlertMonitoring(): void {
+		setInterval(
+			async () => {
+				try {
+					const metrics = this.getMetrics();
+					const health = await this.getSystemHealth();
 
-		//! Configurar consumers para processar eventos das filas
-		const supportedEvents = this.handlerMapper.getSupportedEvents();
+					const newAlerts = this.alertService.checkAlerts(metrics, health);
 
-		for (const eventName of supportedEvents) {
-			const handler = this.handlerMapper.getHandler(eventName);
-			if (handler) {
-				await this.eventQueue.consumeEvents(eventName, async (event) => {
-					await handler(event, this.createMockPayload(event));
-				});
-			}
-		}
-	}
-
-	private createMockPayload(event: WebhookEvent): WebhookPayload {
-		return {
-			token: event.token || 'test-token',
-			events: [event],
-			site: {
-				id: '1',
-				url: 'https://test-moodle.com',
-				name: 'Test Moodle',
-				version: '4.0',
+					if (newAlerts.length > 0) {
+						console.log(`🚨 Generated ${newAlerts.length} new alerts`);
+					}
+				} catch (error) {
+					console.error('Error during alert monitoring:', error);
+				}
 			},
-		};
+			2 * 60 * 1000,
+		); // 2 minutos
 	}
 
 	private async saveEventForAnalytics(
@@ -140,92 +145,91 @@ class WebhookManager {
 		console.log('Event saved for analytics');
 	}
 
-	async start(): Promise<void> {
-		const configManager = ConfigManager.getInstance();
-		const config = configManager.getConfig();
+	private setupHealthChecks(moodleClient: MoodleClient): void {
+		this.healthCheckService = new HealthCheckService();
+
+		// Adicionar health checks
+		this.healthCheckService.addHealthCheck(new MoodleHealthCheck(moodleClient));
+		this.healthCheckService.addHealthCheck(
+			new RedisHealthCheck(this.eventTracker),
+		);
+		this.healthCheckService.addHealthCheck(new MemoryHealthCheck(512)); // 512MB limit
 
 		if (this.eventQueue) {
-			console.log('Initializing RabbitMQ...');
-			await this.eventQueue.initialize();
-			console.log('RabbitMQ connected and queues created');
+			this.healthCheckService.addHealthCheck(
+				new RabbitMQHealthCheck(this.eventQueue),
+			);
 		}
+	}
 
-		await this.server.start();
-		console.log(
-			`Webhook server started at http://${config.server.host}:${config.server.port}`,
-		);
+	async start(): Promise<void> {
+		try {
+			console.log('🚀 Starting Webhook Manager...');
 
-		//* Registrar configuração
-		console.log('Webhook Manager started successfully');
-		console.log(`Processing mode: ${config.processing.mode}`);
-		console.log(
-			`RabbitMQ integration: ${this.eventQueue ? 'enabled' : 'disabled'}`,
-		);
-		console.log(
-			`Queue processing: ${configManager.isQueueEnabled() ? 'enabled' : 'disabled'}`,
-		);
+			// Inicializar event tracker
+			console.log('📊 Connecting to Redis...');
+			// O RedisEventTracker conecta automaticamente quando usado
 
-		//! Mostrar eventos habilitados
-		const enabledEvents = this.eventRegistry.getEnabledEvents();
-		console.log(`Enabled events (${enabledEvents.length}):`, enabledEvents);
+			// Inicializar fila de eventos se configurada
+			if (this.eventQueue) {
+				console.log('🐰 Connecting to RabbitMQ...');
+				await this.eventQueue.initialize();
+			}
 
-		if (this.eventQueue) {
-			console.log('Event handlers registered for RabbitMQ consumers');
-		} else {
-			console.log('Events will be processed directly without queue');
+			// Iniciar servidor
+			console.log('🌐 Starting webhook server...');
+			await this.server.start();
+
+			// Now that the server and optional queue are initialized, set up
+			// processing strategy, register handlers and start consumers.
+			this.setupProcessingStrategy();
+			this.setupEventHandlers();
+			if (this.eventQueue) {
+				await startConsumers(
+					this.eventQueue,
+					this.handlerMapper,
+					this.eventTracker,
+				);
+			}
+
+			// Verificar health inicial
+			console.log('🏥 Checking system health...');
+			const health = await this.healthCheckService.checkAll();
+			console.log('Health status:', health.status);
+
+			if (health.status === 'DOWN') {
+				console.warn('⚠️  System started with degraded health:', health);
+			}
+
+			// Configurar limpeza periódica
+			this.setupPeriodicCleanup();
+
+			console.log('✅ Webhook Manager started successfully!');
+		} catch (error) {
+			console.error('❌ Failed to start Webhook Manager:', error);
+			throw error;
 		}
 	}
 
 	async stop(): Promise<void> {
-		console.log('Stopping Webhook Manager...');
+		console.log('🛑 Stopping Webhook Manager...');
 
-		await this.server.stop();
-		console.log('Webhook server stopped');
+		try {
+			await this.server.stop();
+			console.log('✅ Webhook server stopped');
 
-		if (this.eventQueue) {
-			await this.eventQueue.shutdown();
-			console.log('RabbitMQ connection closed');
-		}
-
-		console.log('Webhook Manager stopped successfully');
-	}
-
-	//! Endpoint de teste do webhook para testes manuais
-	async triggerTestEvent(eventType: string): Promise<void> {
-		const testEvent: WebhookEvent = {
-			eventname: eventType,
-			component: 'core',
-			action: 'test',
-			target: 'test_user',
-			objecttable: 'user',
-			objectid: 999,
-			crud: 'c',
-			edulevel: 2,
-			contextid: 1,
-			contextlevel: 10,
-			contextinstanceid: 0,
-			userid: 999,
-			courseid: 1,
-			anonymous: 0,
-			other: {},
-			timecreated: Math.floor(Date.now() / 1000),
-			host: '127.0.0.1',
-			token: 'test-token',
-			extra: 'test',
-		};
-
-		if (this.eventQueue) {
-			await this.eventQueue.publishEvent(testEvent);
-			console.log(`Test event ${eventType} published to RabbitMQ`);
-		} else {
-			const payload = this.createMockPayload(testEvent);
-			const handler = this.handlerMapper.getHandler(eventType);
-			if (handler) {
-				await handler(testEvent, payload);
-				console.log(`Test event ${eventType} processed locally`);
-			} else {
-				console.log(`No handler found for event ${eventType}`);
+			if (this.eventQueue) {
+				await this.eventQueue.shutdown();
+				console.log('✅ RabbitMQ connection closed');
 			}
+
+			await this.eventTracker.disconnect();
+			console.log('✅ Redis connection closed');
+
+			console.log('✅ Webhook Manager stopped successfully');
+		} catch (error) {
+			console.error('❌ Error during shutdown:', error);
+			throw error;
 		}
 	}
 
@@ -250,12 +254,91 @@ class WebhookManager {
 		return { serverStats };
 	}
 
-	on(eventName: string, handler: EventHandler): void {
-		this.server.on(eventName, handler);
-	}
-
 	onAny(handler: (event: WebhookEvent, payload: WebhookPayload) => void): void {
 		this.server.onAny(handler);
+	}
+
+	private setupPeriodicCleanup(): void {
+		// Limpeza de eventos antigos a cada hora
+		setInterval(
+			async () => {
+				try {
+					const oneDay = 24 * 60 * 60 * 1000; // 24 horas em ms
+					const cleaned = await this.eventTracker.cleanupOldEntries(oneDay);
+					if (cleaned > 0) {
+						console.log(`🧹 Cleaned up ${cleaned} old event entries`);
+					}
+				} catch (error) {
+					console.error('Error during periodic cleanup:', error);
+				}
+			},
+			60 * 60 * 1000,
+		); // A cada hora
+
+		// Reset de métricas a cada dia
+		setInterval(
+			() => {
+				console.log('📊 Resetting daily metrics...');
+				this.metricsCollector.reset();
+			},
+			24 * 60 * 60 * 1000,
+		); // A cada 24 horas
+	}
+
+	async getSystemHealth(): Promise<SystemHealth> {
+		return this.healthCheckService.checkAll();
+	}
+
+	async getComponentHealth(
+		componentName: string,
+	): Promise<HealthStatus | null> {
+		return this.healthCheckService.checkComponent(componentName);
+	}
+
+	getMetrics(): any {
+		return this.metricsCollector.getMetricsSummary();
+	}
+
+	async getDetailedStats(): Promise<{
+		health: SystemHealth;
+		metrics: any;
+		alerts: any;
+		eventTracker: any;
+		queueStats?: any;
+	}> {
+		const health = await this.getSystemHealth();
+		const metrics = this.getMetrics();
+
+		const stats: any = {
+			health,
+			metrics,
+			alerts: {
+				active: this.getActiveAlerts(),
+				total: this.getAlertHistory().length,
+			},
+			eventTracker: {
+				recentEvents: metrics.totalEvents,
+				errorRate: 100 - metrics.successRate,
+			},
+		};
+
+		if (this.eventQueue) {
+			stats.queueStats = await this.eventQueue.getQueueStats();
+		}
+
+		return stats;
+	}
+
+	getActiveAlerts() {
+		return this.alertService.getActiveAlerts();
+	}
+
+	getAlertHistory(limit?: number) {
+		return this.alertService.getAlertHistory(limit);
+	}
+
+	clearAlert(alertId: string): boolean {
+		return this.alertService.clearAlert(alertId);
 	}
 }
 
@@ -266,15 +349,6 @@ async function createWebhookManager(): Promise<WebhookManager> {
 
 	//! Obter configuração centralizada
 	const configManager = ConfigManager.getInstance();
-
-	console.log('Initializing webhook system with configuration:');
-	console.log(
-		`- Processing Mode: ${configManager.getConfig().processing.mode}`,
-	);
-	console.log(`- Queue Enabled: ${configManager.isQueueEnabled()}`);
-	console.log(
-		`- Server: ${configManager.getConfig().server.host}:${configManager.getConfig().server.port}`,
-	);
 
 	//! Criar fila de eventos RabbitMQ se habilitada
 	let eventQueue: WebhookEventQueue | undefined;
@@ -292,8 +366,6 @@ async function createWebhookManager(): Promise<WebhookManager> {
 if (require.main === module) {
 	async function main() {
 		try {
-			console.log('Starting Webhook System...');
-
 			const manager = await createWebhookManager();
 
 			//! Configurar desligamento graceful
@@ -303,7 +375,12 @@ if (require.main === module) {
 					await manager.stop();
 					process.exit(0);
 				} catch (error) {
-					console.error('Error during shutdown:', error);
+					manager
+						.getErrorHandler()
+						.handleError(
+							error instanceof Error ? error : new Error('Shutdown error'),
+							{ signal, component: 'WebhookManager', operation: 'shutdown' },
+						);
 					process.exit(1);
 				}
 			};
@@ -313,10 +390,16 @@ if (require.main === module) {
 
 			//! Iniciar o webhook manager
 			await manager.start();
-
-			console.log('Webhook system started successfully!');
 		} catch (error) {
-			console.error('Failed to start webhook system:', error);
+			const manager = new WebhookManager();
+			manager
+				.getErrorHandler()
+				.handleError(
+					error instanceof Error
+						? error
+						: new Error('Failed to start webhook system'),
+					{ component: 'WebhookManager', operation: 'main' },
+				);
 			process.exit(1);
 		}
 	}

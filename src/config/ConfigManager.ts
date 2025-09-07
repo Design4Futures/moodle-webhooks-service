@@ -1,5 +1,10 @@
 import dotenv from 'dotenv';
+import {
+	InvalidConfigurationError,
+	MissingConfigurationError,
+} from '../errors';
 import type { ProcessingMode } from '../strategies/EventProcessingStrategyFactory';
+import { EventRegistry } from './EventRegistry';
 
 dotenv.config();
 
@@ -7,6 +12,8 @@ export interface AppConfig {
 	server: {
 		port: number;
 		host: string;
+		hookPath: string;
+		enabledEvents: string[];
 		rateLimit: {
 			windowMs: number;
 			max: number;
@@ -30,6 +37,37 @@ export interface AppConfig {
 	logging: {
 		level: 'debug' | 'info' | 'warn' | 'error';
 		enableAnalytics: boolean;
+	};
+	service: {
+		baseUrl: string;
+	};
+	redis: {
+		url: string;
+		keyPrefix: string;
+		lockPrefix: string;
+		defaultTtl: number;
+		maxRetries: number;
+	};
+
+	circuitBreaker: {
+		failureThreshold: number;
+		resetTimeout: number;
+		monitoringPeriod: number;
+	};
+
+	healthCheck: {
+		timeout: number;
+		memoryLimitMB: number;
+	};
+
+	cleanup: {
+		eventTtlHours: number;
+		metricsResetHours: number;
+		cleanupIntervalMinutes: number;
+	};
+
+	alert: {
+		url: string;
 	};
 }
 
@@ -58,6 +96,8 @@ export class ConfigManager {
 			server: {
 				port: Number.parseInt(process.env.PORT || '3000'),
 				host: process.env.HOST || '0.0.0.0',
+				hookPath: process.env.WEBHOOK_PATH || '/webhook',
+				enabledEvents: EventRegistry.getInstance().getEnabledEvents(),
 				rateLimit: {
 					windowMs: Number.parseInt(
 						process.env.RATE_LIMIT_WINDOW_MS || '60000',
@@ -78,6 +118,47 @@ export class ConfigManager {
 					(process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error') ||
 					'info',
 				enableAnalytics: process.env.ENABLE_ANALYTICS !== 'false',
+			},
+			service: {
+				baseUrl: process.env.SERVICE_BASE_URL || 'http://localhost:3000',
+			},
+			redis: {
+				url: process.env.REDIS_URL || 'redis://localhost:6379',
+				keyPrefix: process.env.REDIS_KEY_PREFIX || 'webhook:events',
+				lockPrefix: process.env.REDIS_LOCK_PREFIX || 'webhook:locks',
+				defaultTtl: Number.parseInt(process.env.REDIS_DEFAULT_TTL || '86400'), // 24h
+				maxRetries: Number.parseInt(process.env.REDIS_MAX_RETRIES || '3'),
+			},
+
+			circuitBreaker: {
+				failureThreshold: Number.parseInt(
+					process.env.CB_FAILURE_THRESHOLD || '5',
+				),
+				resetTimeout: Number.parseInt(process.env.CB_RESET_TIMEOUT || '30000'),
+				monitoringPeriod: Number.parseInt(
+					process.env.CB_MONITORING_PERIOD || '60000',
+				),
+			},
+
+			healthCheck: {
+				timeout: Number.parseInt(process.env.HEALTH_CHECK_TIMEOUT || '10000'),
+				memoryLimitMB: Number.parseInt(process.env.MEMORY_LIMIT_MB || '512'),
+			},
+
+			cleanup: {
+				eventTtlHours: Number.parseInt(process.env.EVENT_TTL_HOURS || '24'),
+				metricsResetHours: Number.parseInt(
+					process.env.METRICS_RESET_HOURS || '24',
+				),
+				cleanupIntervalMinutes: Number.parseInt(
+					process.env.CLEANUP_INTERVAL_MINUTES || '60',
+				),
+			},
+
+			alert: {
+				url:
+					process.env.ALERT_WEBHOOK_URL ||
+					'https://hooks.slack.com/services/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',
 			},
 		};
 
@@ -100,16 +181,20 @@ export class ConfigManager {
 		const { moodle, rabbitmq, processing } = this.config;
 
 		if (!moodle.baseUrl || !moodle.token) {
-			throw new Error(
-				'Moodle configuration (MOODLE_BASE_URL, MOODLE_TOKEN) is required',
-			);
+			throw new MissingConfigurationError(['MOODLE_BASE_URL', 'MOODLE_TOKEN'], {
+				component: 'ConfigManager',
+				reason: 'Moodle configuration is required for webhook processing',
+			});
 		}
 
 		if (processing.enableQueue && processing.mode !== 'direct') {
 			if (!rabbitmq || !rabbitmq.url) {
-				throw new Error(
-					'RabbitMQ configuration is required when queue processing is enabled',
-				);
+				throw new MissingConfigurationError(['RABBITMQ_URL'], {
+					component: 'ConfigManager',
+					reason:
+						'RabbitMQ configuration is required when queue processing is enabled',
+					currentMode: processing.mode,
+				});
 			}
 		}
 
@@ -117,14 +202,15 @@ export class ConfigManager {
 			processing.mode &&
 			!['direct', 'queue', 'hybrid'].includes(processing.mode)
 		) {
-			throw new Error(
-				`Invalid processing mode: ${processing.mode}. Must be 'direct', 'queue', or 'hybrid'`,
+			throw new InvalidConfigurationError(
+				'PROCESSING_MODE',
+				'direct | queue | hybrid',
+				{
+					providedValue: processing.mode,
+					validValues: ['direct', 'queue', 'hybrid'],
+				},
 			);
 		}
-	}
-
-	updateProcessingMode(mode: ProcessingMode): void {
-		this.config.processing.mode = mode;
 	}
 
 	isQueueEnabled(): boolean {
@@ -135,7 +221,13 @@ export class ConfigManager {
 
 	getRabbitMQConfig() {
 		if (!this.config.rabbitmq) {
-			throw new Error('RabbitMQ configuration not available');
+			throw new MissingConfigurationError(
+				['RABBITMQ_URL', 'RABBITMQ_EXCHANGE'],
+				{
+					component: 'ConfigManager',
+					reason: 'RabbitMQ configuration not available',
+				},
+			);
 		}
 		return this.config.rabbitmq;
 	}
@@ -146,5 +238,25 @@ export class ConfigManager {
 
 	getServerConfig() {
 		return this.config.server;
+	}
+
+	getRedisConfig() {
+		return this.config.redis;
+	}
+
+	getCircuitBreakerConfig() {
+		return this.config.circuitBreaker;
+	}
+
+	getHealthCheckConfig() {
+		return this.config.healthCheck;
+	}
+
+	getCleanupConfig() {
+		return this.config.cleanup;
+	}
+
+	getAlertConfig() {
+		return this.config.alert;
 	}
 }

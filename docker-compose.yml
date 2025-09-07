@@ -1,15 +1,14 @@
 services:
   rabbitmq:
-    image: rabbitmq:3-management
-    container_name: webhook-rabbitmq
+    image: ${RABBITMQ_IMAGE:-rabbitmq:3-management}
     restart: unless-stopped
     ports:
-      - "5672:5672"     # AMQP port
-      - "15672:15672"   # Management UI port
+      - "${RABBITMQ_AMQP_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: admin
-      RABBITMQ_DEFAULT_PASS: admin123
-      RABBITMQ_DEFAULT_VHOST: /
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-admin123}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST:-/}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
@@ -21,26 +20,91 @@ services:
     networks:
       - webhook-network
 
-  # Webhook service (opcional - para desenvolvimento)
-  webhook-service:
-    build: .
-    container_name: webhook-service
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  webhooks:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${IMAGE_NAME:-design4futures/webhooks:latest}
     restart: unless-stopped
     ports:
-      - "3333:3333"
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
     environment:
-      - NODE_ENV=production
-      - WEBHOOK_PORT=3333
-      - WEBHOOK_HOST=0.0.0.0
-      - RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672
-      - RABBITMQ_EXCHANGE=webhook.events
+      - NODE_ENV=${NODE_ENV:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENABLE_ANALYTICS=${ENABLE_ANALYTICS:-true}
+
+      # Server Configuration
+      - PORT=${PORT:-3000}
+      - HOST=${HOST:-0.0.0.0}
+      - WEBHOOK_PATH=${WEBHOOK_PATH:-/webhook}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+
+      # Moodle Configuration (required)
+      - MOODLE_BASE_URL=${MOODLE_BASE_URL}
+      - MOODLE_TOKEN=${MOODLE_TOKEN}
+
+      # RabbitMQ Configuration
+      - RABBITMQ_ENABLED=${RABBITMQ_ENABLED:-false}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - RABBITMQ_EXCHANGE=${RABBITMQ_EXCHANGE:-webhook.events}
+      - RABBITMQ_RETRY_ATTEMPTS=${RABBITMQ_RETRY_ATTEMPTS:-3}
+      - RABBITMQ_RETRY_DELAY=${RABBITMQ_RETRY_DELAY:-5000}
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER:-admin}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS:-admin123}
+
+      # Processing
+      - PROCESSING_MODE=${PROCESSING_MODE:-hybrid}
+      - ENABLE_QUEUE=${ENABLE_QUEUE:-false}
+
+      # Redis
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-webhook:events}
+      - REDIS_LOCK_PREFIX=${REDIS_LOCK_PREFIX:-webhook:locks}
+      - REDIS_DEFAULT_TTL=${REDIS_DEFAULT_TTL:-86400}
+      - REDIS_MAX_RETRIES=${REDIS_MAX_RETRIES:-3}
+
+      # Circuit Breaker
+      - CB_FAILURE_THRESHOLD=${CB_FAILURE_THRESHOLD:-5}
+      - CB_RESET_TIMEOUT=${CB_RESET_TIMEOUT:-30000}
+      - CB_MONITORING_PERIOD=${CB_MONITORING_PERIOD:-60000}
+
+      # Health / Cleanup / Rate limiting
+      - HEALTH_CHECK_TIMEOUT=${HEALTH_CHECK_TIMEOUT:-10000}
+      - MEMORY_LIMIT_MB=${MEMORY_LIMIT_MB:-512}
+      - EVENT_TTL_HOURS=${EVENT_TTL_HOURS:-24}
+      - METRICS_RESET_HOURS=${METRICS_RESET_HOURS:-24}
+      - CLEANUP_INTERVAL_MINUTES=${CLEANUP_INTERVAL_MINUTES:-60}
+      - RATE_LIMIT_WINDOW_MS=${RATE_LIMIT_WINDOW_MS:-60000}
+      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-100}
+
+      # Service / Alerts
+      - SERVICE_BASE_URL=${SERVICE_BASE_URL:-http://localhost:3000}
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL}
     depends_on:
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - webhook-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "const http=require('http');const p=process.env.PORT||3000;const req=http.get({host:'127.0.0.1',port:p,path:'/health',timeout:5000},res=>{if(res.statusCode===200)process.exit(0);else process.exit(1)});req.on('error',()=>process.exit(1));req.on('timeout',()=>{req.destroy();process.exit(1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
 volumes:
+  redis_data:
   rabbitmq_data:
 
 networks:

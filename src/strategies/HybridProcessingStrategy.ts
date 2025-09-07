@@ -1,5 +1,6 @@
+import { QueueConnectionError } from '../errors';
 import type {
-	IEventHandler,
+	IEventHandlerMapper,
 	IEventProcessingStrategy,
 	IEventQueue,
 } from '../interfaces/EventInterfaces';
@@ -11,10 +12,7 @@ export class HybridProcessingStrategy implements IEventProcessingStrategy {
 	private directStrategy: DirectProcessingStrategy;
 	private queueStrategy: QueueProcessingStrategy | null;
 
-	constructor(
-		handlerMapper: Map<string, IEventHandler>,
-		eventQueue?: IEventQueue,
-	) {
+	constructor(handlerMapper: IEventHandlerMapper, eventQueue?: IEventQueue) {
 		this.directStrategy = new DirectProcessingStrategy(handlerMapper);
 		this.queueStrategy = eventQueue
 			? new QueueProcessingStrategy(eventQueue)
@@ -27,11 +25,11 @@ export class HybridProcessingStrategy implements IEventProcessingStrategy {
 			try {
 				await this.queueStrategy.process(event, payload);
 			} catch (error) {
-				console.warn(
-					`Processamento via fila falhou para ${event.eventname}, usando processamento direto:`,
-					error,
-				);
-				await this.directStrategy.process(event, payload);
+				if (error instanceof QueueConnectionError) {
+					await this.directStrategy.process(event, payload);
+				} else {
+					throw error;
+				}
 			}
 		} else {
 			await this.directStrategy.process(event, payload);

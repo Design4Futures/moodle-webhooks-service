@@ -1,6 +1,10 @@
 import { EventRegistry } from '../config/EventRegistry';
+import {
+	EventHandlerNotFoundError,
+	WebhookEventProcessingError,
+} from '../errors';
 import type { IEventQueue } from '../interfaces/EventInterfaces';
-import type { WebhookEvent } from '../types/webhook';
+import type { WebhookEvent, WebhookPayload } from '../types/webhook';
 import { type RabbitMQConfig, RabbitMQService } from './RabbitMQService';
 
 export interface EventMessage extends WebhookEvent {
@@ -50,6 +54,8 @@ export class WebhookEventQueue implements IEventQueue {
 				`${config.routingKey}.retry`,
 				{
 					durable: true,
+					deadLetterExchange: this.rabbitmq.exchangeName,
+					deadLetterRoutingKey: config.routingKey,
 					...(config.ttl && { messageTtl: config.ttl * 2 }),
 				},
 			);
@@ -67,7 +73,10 @@ export class WebhookEventQueue implements IEventQueue {
 		);
 	}
 
-	async publishEvent(event: WebhookEvent): Promise<void> {
+	async publishEvent(
+		event: WebhookEvent,
+		payload?: WebhookPayload,
+	): Promise<void> {
 		const config =
 			this.eventRegistry.getEventConfig(event.eventname) ||
 			this.eventRegistry.getDefaultEventConfig();
@@ -85,7 +94,16 @@ export class WebhookEventQueue implements IEventQueue {
 			messageOptions.priority = config.priority;
 		}
 
-		await this.rabbitmq.publishEvent(event, config.routingKey, messageOptions);
+		const messageBody = {
+			...event,
+			originalPayload: payload,
+		};
+
+		await this.rabbitmq.publishEvent(
+			messageBody as any,
+			config.routingKey,
+			messageOptions,
+		);
 
 		console.log(`Event ${event.eventname} sent to queue ${config.queueName}`);
 	}
@@ -141,7 +159,11 @@ export class WebhookEventQueue implements IEventQueue {
 	): Promise<void> {
 		const config = this.eventRegistry.getEventConfig(eventType);
 		if (!config) {
-			throw new Error(`Configuration not found for event: ${eventType}`);
+			throw new EventHandlerNotFoundError(eventType, {
+				availableEvents: this.eventRegistry
+					.getAllEvents()
+					.map((e) => e.eventName),
+			});
 		}
 
 		await this.rabbitmq.consumeQueue(
@@ -156,17 +178,15 @@ export class WebhookEventQueue implements IEventQueue {
 					);
 					console.log(`Event ${eventType} processed successfully`);
 				} catch (error) {
-					console.error(`Error processing event ${eventType}:`, error);
-
-					if (retryCount < (config.retries || 2)) {
-						await this.retryFailedEvent(eventMessage, retryCount);
-					} else {
-						console.error(
-							`Event ${eventType} failed permanently after ${retryCount} attempts`,
-						);
-					}
-
-					throw error;
+					throw new WebhookEventProcessingError(
+						eventType,
+						error instanceof Error ? error : new Error('Unknown error'),
+						{
+							retryCount,
+							maxRetries: config.retries || 2,
+							messageId: eventMessage.messageId,
+						},
+					);
 				}
 			},
 			{

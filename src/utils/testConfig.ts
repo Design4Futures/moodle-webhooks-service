@@ -1,8 +1,11 @@
 import { ConfigManager } from '../config/ConfigManager';
 import { EventRegistry } from '../config/EventRegistry';
+import { type ErrorHandler, initializeErrorHandling } from '../errors';
 
 async function testModernWebhookManager() {
 	console.log('Testing Modern WebhookManager Configuration...\n');
+
+	const errorHandler: ErrorHandler = initializeErrorHandling();
 
 	try {
 		//* Testar ConfigManager
@@ -25,7 +28,10 @@ async function testModernWebhookManager() {
 		console.log('\nAll systems ready! WebhookManager can be started safely.');
 		return true;
 	} catch (error) {
-		console.error('Configuration error:', error);
+		errorHandler.handleError(
+			error instanceof Error ? error : new Error('Configuration test failed'),
+			{ component: 'testConfig', operation: 'testModernWebhookManager' },
+		);
 		return false;
 	}
 }

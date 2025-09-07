@@ -4,7 +4,7 @@ import type {
 	IEventHandlerMapper,
 } from '../interfaces/EventInterfaces';
 import type { EventHandler } from '../types/eventhandler';
-import { MOODLE_EVENTS, type MoodleEventType } from './EventRegistry';
+import { EventRegistry, type MoodleEventType } from './EventRegistry';
 
 export class EventHandlerMapper implements IEventHandlerMapper {
 	private handlerMap: Map<MoodleEventType, EventHandler> = new Map();
@@ -14,21 +14,28 @@ export class EventHandlerMapper implements IEventHandlerMapper {
 	}
 
 	private setupHandlerMapping(handlers: MoodleEventHandlers): void {
-		this.handlerMap.set(MOODLE_EVENTS.USER_CREATED, handlers.userCreated);
-		this.handlerMap.set(MOODLE_EVENTS.USER_LOGGED_IN, handlers.userLoggedIn);
-		this.handlerMap.set(MOODLE_EVENTS.USER_ENROLLED, handlers.userEnrolled);
-		this.handlerMap.set(
-			MOODLE_EVENTS.COURSE_COMPLETED,
-			handlers.courseCompleted,
-		);
-		this.handlerMap.set(
-			MOODLE_EVENTS.ASSIGNMENT_SUBMITTED,
-			handlers.assignmentSubmitted,
-		);
-		this.handlerMap.set(
-			MOODLE_EVENTS.QUIZ_ATTEMPTED,
-			handlers.quizAttemptFinished,
-		);
+		const supported = EventRegistry.getInstance().getSupportedEventNames();
+
+		for (const eventName of supported) {
+			const raw = (eventName.split('\\').pop() || eventName).replace(
+				/[^a-z0-9_]/gi,
+				'',
+			);
+			const parts = raw.split('_').filter(Boolean);
+			const methodName = parts
+				.map((p, i) => (i === 0 ? p : p.charAt(0).toUpperCase() + p.slice(1)))
+				.join('');
+
+			const maybeHandler = (handlers as unknown as Record<string, unknown>)[
+				methodName
+			];
+			if (typeof maybeHandler === 'function') {
+				this.handlerMap.set(
+					eventName as MoodleEventType,
+					maybeHandler as EventHandler,
+				);
+			}
+		}
 	}
 
 	getHandler(eventName: string): IEventHandler | undefined {

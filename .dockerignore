@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.github
+coverage
+.DS_Store
+npm-debug.log
+pnpm-debug.log
+*.local
+*.env.local
+.env
+logs
+tmp

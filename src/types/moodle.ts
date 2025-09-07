@@ -25,6 +25,7 @@ export interface MoodleUser {
 	password?: string;
 	firstname: string;
 	lastname: string;
+	fullname: string;
 	email: string;
 	auth?: string;
 	idnumber?: string;
@@ -40,6 +41,7 @@ export interface MoodleUser {
 	lastnamephonetic?: string;
 	middlename?: string;
 	alternatename?: string;
+	profileimageurl?: string;
 }
 
 export interface MoodleCourse {

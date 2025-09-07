@@ -1,5 +1,10 @@
 /** biome-ignore-all lint/suspicious/noExplicitAny: <any> */
 import * as amqp from 'amqplib';
+import {
+	QueueConnectionError,
+	QueueCreationError,
+	QueuePublishError,
+} from '../errors';
 import type { WebhookEvent } from '../types/webhook';
 
 export interface RabbitMQConfig {
@@ -32,7 +37,6 @@ export class RabbitMQService {
 
 	async connect(): Promise<void> {
 		try {
-			console.log('Connecting to RabbitMQ...');
 			this.connection = await amqp.connect(this.config.url);
 			this.channel = await this.connection.createChannel();
 
@@ -53,10 +57,12 @@ export class RabbitMQService {
 			this.connection?.on('close', this.handleConnectionClose.bind(this));
 
 			this.isConnected = true;
-			console.log('Conectado ao RabbitMQ com sucesso');
 		} catch (error) {
-			console.error('Erro ao conectar ao RabbitMQ:', error);
-			throw error;
+			throw new QueueConnectionError('Erro ao conectar ao RabbitMQ', {
+				url: this.config.url,
+				exchangeName: this.config.exchangeName,
+				originalError: error instanceof Error ? error.message : 'Unknown error',
+			});
 		}
 	}
 
@@ -71,7 +77,9 @@ export class RabbitMQService {
 			this.isConnected = false;
 			console.log('Desconectado do RabbitMQ');
 		} catch (error) {
-			console.error('Erro ao desconectar do RabbitMQ:', error);
+			throw new QueueConnectionError('Erro ao desconectar do RabbitMQ', {
+				originalError: error instanceof Error ? error.message : 'Unknown error',
+			});
 		}
 	}
 
@@ -81,7 +89,11 @@ export class RabbitMQService {
 		options: MessageOptions = {},
 	): Promise<void> {
 		if (!this.isConnected || !this.channel) {
-			throw new Error('RabbitMQ is not connected');
+			throw new QueueConnectionError('RabbitMQ não está conectado', {
+				routingKey,
+				isConnected: this.isConnected,
+				hasChannel: !!this.channel,
+			});
 		}
 
 		const message = {
@@ -107,7 +119,15 @@ export class RabbitMQService {
 			);
 
 			if (!published) {
-				throw new Error('Falha ao publicar mensagem - buffer cheio');
+				throw new QueuePublishError(
+					routingKey,
+					new Error('Buffer cheio - falha ao publicar mensagem'),
+					{
+						eventname: event.eventname,
+						userid: event.userid,
+						messageId: message.messageId,
+					},
+				);
 			}
 
 			console.log(` Evento publicado: ${routingKey}`, {
@@ -116,8 +136,14 @@ export class RabbitMQService {
 				messageId: message.messageId,
 			});
 		} catch (error) {
-			console.error(`Erro ao publicar evento ${routingKey}:`, error);
-			throw error;
+			throw new QueuePublishError(
+				routingKey,
+				error instanceof Error ? error : new Error('Unknown error'),
+				{
+					eventname: event.eventname,
+					userid: event.userid,
+				},
+			);
 		}
 	}
 
@@ -129,33 +155,47 @@ export class RabbitMQService {
 			exclusive?: boolean;
 			autoDelete?: boolean;
 			deadLetterExchange?: string;
+			deadLetterRoutingKey?: string;
 			messageTtl?: number;
 		} = {},
 	): Promise<void> {
 		if (!this.channel) {
-			throw new Error('Canal RabbitMQ não está disponível');
+			throw new QueueConnectionError('Canal RabbitMQ não está disponível', {
+				queueName,
+				routingKey,
+			});
 		}
 
-		const queueOptions = {
-			durable: true,
-			exclusive: false,
-			autoDelete: false,
-			arguments: {
-				'x-dead-letter-exchange':
-					options.deadLetterExchange || `${this.config.exchangeName}.dlx`,
-				...(options.messageTtl && { 'x-message-ttl': options.messageTtl }),
-			},
-			...options,
-		};
+		try {
+			const queueOptions = {
+				durable: true,
+				exclusive: false,
+				autoDelete: false,
+				arguments: {
+					...(options.deadLetterExchange && {
+						'x-dead-letter-exchange': options.deadLetterExchange,
+					}),
+					...(options.deadLetterRoutingKey && {
+						'x-dead-letter-routing-key': options.deadLetterRoutingKey,
+					}),
+					...(options.messageTtl && { 'x-message-ttl': options.messageTtl }),
+				},
+				...options,
+			};
 
-		await this.channel.assertQueue(queueName, queueOptions);
-		await this.channel.bindQueue(
-			queueName,
-			this.config.exchangeName,
-			routingKey,
-		);
-
-		console.log(`Fila criada: ${queueName} -> ${routingKey}`);
+			await this.channel.assertQueue(queueName, queueOptions);
+			await this.channel.bindQueue(
+				queueName,
+				this.config.exchangeName,
+				routingKey,
+			);
+		} catch (error) {
+			throw new QueueCreationError(
+				queueName,
+				error instanceof Error ? error : new Error('Unknown error'),
+				{ routingKey, options },
+			);
+		}
 	}
 
 	async consumeQueue(
@@ -169,7 +209,9 @@ export class RabbitMQService {
 		} = {},
 	): Promise<void> {
 		if (!this.channel) {
-			throw new Error('Canal RabbitMQ não está disponível');
+			throw new QueueConnectionError('Canal RabbitMQ não está disponível', {
+				queueName,
+			});
 		}
 
 		if (options.prefetch) {
@@ -187,6 +229,9 @@ export class RabbitMQService {
 
 					if (!options.noAck && this.channel) {
 						this.channel.ack(msg);
+						console.log(
+							`Message acked (queue: ${queueName}, messageId: ${msg.properties?.messageId})`,
+						);
 					}
 				} catch (error) {
 					console.error(
@@ -194,9 +239,53 @@ export class RabbitMQService {
 						error,
 					);
 
-					//* Rejeita a mensagem e envia para dead letter queue
-					if (!options.noAck && this.channel) {
-						this.channel.nack(msg, false, false);
+					const headers = msg.properties?.headers || {};
+					const retryCount = Number(headers.retryCount || 0);
+					const maxRetries = Number(headers.maxRetries || 2);
+					const routingKey = msg.fields?.routingKey || '';
+
+					if (retryCount < maxRetries && this.channel) {
+						try {
+							const retryRoutingKey = `${routingKey}.retry`;
+							const backoff = 2 ** retryCount * 1000;
+
+							this.channel.publish(
+								this.config.exchangeName,
+								retryRoutingKey,
+								msg.content,
+								{
+									persistent: true,
+									contentType: 'application/json',
+									timestamp: Date.now(),
+									messageId:
+										msg.properties?.messageId || this.generateMessageId(),
+									expiration: backoff.toString(),
+									headers: {
+										...(headers || {}),
+										retryCount: retryCount + 1,
+										maxRetries,
+									},
+								},
+							);
+
+							this.channel.ack(msg);
+							console.log(
+								`Message scheduled for retry ${retryCount + 1}/${maxRetries} (original routingKey: ${routingKey}, retryRoutingKey: ${retryRoutingKey}, messageId: ${msg.properties?.messageId})`,
+							);
+						} catch (pubErr) {
+							console.error('Failed to publish retry message:', pubErr);
+							if (!options.noAck && this.channel) {
+								this.channel.nack(msg, false, false);
+							}
+						}
+					} else {
+						// No more retries: send to dead-letter (nack without requeue)
+						if (!options.noAck && this.channel) {
+							this.channel.nack(msg, false, false);
+							console.log(
+								`Message nacked to DLX (queue: ${queueName}, messageId: ${msg.properties?.messageId})`,
+							);
+						}
 					}
 				}
 			},
@@ -211,14 +300,28 @@ export class RabbitMQService {
 		consumerCount: number;
 	}> {
 		if (!this.channel) {
-			throw new Error('Canal RabbitMQ não está disponível');
+			throw new QueueConnectionError('Canal RabbitMQ não está disponível', {
+				queueName,
+				operation: 'getQueueInfo',
+			});
 		}
 
-		const queueInfo = await this.channel.checkQueue(queueName);
-		return {
-			messageCount: queueInfo.messageCount,
-			consumerCount: queueInfo.consumerCount,
-		};
+		try {
+			const queueInfo = await this.channel.checkQueue(queueName);
+			return {
+				messageCount: queueInfo.messageCount,
+				consumerCount: queueInfo.consumerCount,
+			};
+		} catch (error) {
+			throw new QueueConnectionError(
+				`Erro ao obter informações da fila ${queueName}`,
+				{
+					queueName,
+					originalError:
+						error instanceof Error ? error.message : 'Unknown error',
+				},
+			);
+		}
 	}
 
 	private handleConnectionError(error: Error): void {
@@ -265,5 +368,9 @@ export class RabbitMQService {
 
 	get connected(): boolean {
 		return this.isConnected;
+	}
+
+	get exchangeName(): string {
+		return this.config.exchangeName;
 	}
 }

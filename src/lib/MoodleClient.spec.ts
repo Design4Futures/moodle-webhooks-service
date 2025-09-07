@@ -29,9 +29,26 @@ describe('MoodleClient', () => {
 		});
 	});
 
-	describe('Parameter flattening', () => {
-		it('should flatten nested objects correctly', () => {
-			expect(true).toBe(true);
+	describe('getUserById', () => {
+		it('should return user data when user exists', async () => {
+			const user = {
+				id: 1,
+				username: 'testuser',
+				firstname: 'Test',
+				lastname: 'User',
+				email: 'testuser@example.com',
+			};
+			// @ts-ignore
+			client.makeRequest = jest.fn().mockResolvedValue([user]);
+			const result = await client.getUserById(1);
+			console.log('result', result);
+			expect(result).toEqual(user);
+		});
+
+		it('should throw MoodleResourceNotFoundError when user does not exist', async () => {
+			// @ts-ignore
+			client.makeRequest = jest.fn().mockResolvedValue([]);
+			await expect(client.getUserById(999)).rejects.toThrow('user');
 		});
 	});
 });
