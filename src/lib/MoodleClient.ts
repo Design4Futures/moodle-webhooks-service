@@ -241,11 +241,13 @@ export class MoodleClient {
 				response.courses.length === 0 ||
 				!response.courses[0]
 			) {
+			console.log('response', response);
 				throw new MoodleResourceNotFoundError('course', id);
 			}
 
 			return response.courses[0];
 		} catch (error) {
+			console.log(error)
 			if (error instanceof MoodleResourceNotFoundError) {
 				throw error;
 			}

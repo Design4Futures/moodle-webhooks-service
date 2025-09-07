@@ -46,7 +46,8 @@ export class MoodleEventHandlers {
 	courseCreated: EventHandler = async (event: WebhookEvent) => {
 		const result = await executeWithRetry(
 			async () => {
-				await this.serviceClient.createCourseProfile(event);
+				const course = await this.moodleClient.getCourseById(event.objectid);
+				await this.serviceClient.createCourseProfile(course);
 			},
 			{
 				maxAttempts: 3,
@@ -81,11 +82,7 @@ export class MoodleEventHandlers {
 					this.moodleClient.getCourseById(event.courseid!),
 				]);
 
-				await Promise.all([
-					this.generateCertificate(user, course),
-					this.updateExternalProgress(user, course, 'completed'),
-					this.triggerNextCourseRecommendation(user, course),
-				]);
+				await this.serviceClient.courseCompleted(user, course);
 			},
 			{
 				maxAttempts: 5,
@@ -110,30 +107,4 @@ export class MoodleEventHandlers {
 			);
 		}
 	};
-
-	private async generateCertificate(
-		user: unknown,
-		_course: unknown,
-	): Promise<void> {
-		console.log(`Certificado gerado para ${JSON.stringify(user)}`);
-
-		//TODO: Logica para geracao das microcredenciais
-	}
-
-	private async updateExternalProgress(
-		_user: unknown,
-		_course: unknown,
-		status: string,
-	): Promise<void> {
-		console.log(`Progresso atualizado no sistema externo: ${status}`);
-	}
-
-	private async triggerNextCourseRecommendation(
-		user: unknown,
-		_course: unknown,
-	): Promise<void> {
-		console.log(
-			`Recomendações de próximos cursos para ${JSON.stringify(user)}`,
-		);
-	}
 }

@@ -1,8 +1,7 @@
 import axios, { type AxiosInstance, type AxiosResponse } from 'axios';
 import type { AppConfig } from '../config/ConfigManager';
 import { CircuitBreaker } from '../services/CircuitBreaker';
-import type { MoodleUser } from '../types/moodle';
-import type { WebhookEvent } from '../types/webhook';
+import type { MoodleCourse, MoodleUser } from '../types/moodle';
 
 export class ServiceClient {
 	private client: AxiosInstance;
@@ -66,12 +65,21 @@ export class ServiceClient {
 		await this.makeRequest('post', '/api/v1/users', data);
 	}
 
-	public async createCourseProfile(course: WebhookEvent): Promise<void> {
+	public async createCourseProfile(course: MoodleCourse): Promise<void> {
 		const data = {
-			externalCourseId: course.objectid,
-			title: course.other?.shortname,
-			description: course.other?.fullname,
+			externalCourseId: course.id,
+			title: course.shortname,
+			description: course.fullname,
 		};
 		await this.makeRequest('post', '/api/v1/courses', data);
+	}
+
+	public async courseCompleted(user: MoodleUser, course: MoodleCourse): Promise<void> {
+		const data = {
+			externalCourseId: course.id,
+			externalUserId: user.id,
+			completionDate: new Date().toISOString(),
+		};
+		await this.makeRequest('post', '/api/v1/microcredentials/course/assign', data);
 	}
 }
