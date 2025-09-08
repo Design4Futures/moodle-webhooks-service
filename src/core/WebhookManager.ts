@@ -10,6 +10,7 @@ import type { HealthStatus, SystemHealth } from '../interfaces/IHealthCheck';
 import { MoodleClient } from '../lib/MoodleClient';
 import { ServiceClient } from '../lib/ServiceClient';
 import { AlertService } from '../services/Alert';
+import { ServiceHealthCheck } from '../services/ClientHealthCheck';
 import { startConsumers } from '../services/ConsumerManager';
 import { HealthCheckService } from '../services/HealthCheck';
 import { MemoryHealthCheck } from '../services/MemoryHealthCheck';
@@ -78,7 +79,7 @@ class WebhookManager {
 		//! Configurar verificação periódica de alertas
 		this.setupAlertMonitoring();
 
-		this.setupHealthChecks(moodleClientInstance);
+		this.setupHealthChecks(moodleClientInstance, serviceClientInstance);
 	}
 
 	public getErrorHandler(): ErrorHandler {
@@ -145,11 +146,17 @@ class WebhookManager {
 		console.log('Event saved for analytics');
 	}
 
-	private setupHealthChecks(moodleClient: MoodleClient): void {
+	private setupHealthChecks(
+		moodleClient: MoodleClient,
+		serviceClient: ServiceClient,
+	): void {
 		this.healthCheckService = new HealthCheckService();
 
 		// Adicionar health checks
 		this.healthCheckService.addHealthCheck(new MoodleHealthCheck(moodleClient));
+		this.healthCheckService.addHealthCheck(
+			new ServiceHealthCheck(serviceClient),
+		);
 		this.healthCheckService.addHealthCheck(
 			new RedisHealthCheck(this.eventTracker),
 		);
