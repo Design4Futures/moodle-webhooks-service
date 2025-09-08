@@ -55,6 +55,10 @@ export class ServiceClient {
 		});
 	}
 
+	getCircuitBreakerStats() {
+		return this.circuitBreaker.getStats();
+	}
+
 	public async createUserProfile(user: MoodleUser): Promise<void> {
 		const data = {
 			email: user.email,
@@ -74,12 +78,30 @@ export class ServiceClient {
 		await this.makeRequest('post', '/api/v1/courses', data);
 	}
 
-	public async courseCompleted(user: MoodleUser, course: MoodleCourse): Promise<void> {
+	public async courseCompleted(
+		user: MoodleUser,
+		course: MoodleCourse,
+	): Promise<void> {
 		const data = {
 			externalCourseId: course.id,
 			externalUserId: user.id,
 			completionDate: new Date().toISOString(),
 		};
-		await this.makeRequest('post', '/api/v1/microcredentials/course/assign', data);
+		await this.makeRequest(
+			'post',
+			'/api/v1/microcredentials/course/assign',
+			data,
+		);
+	}
+
+	async testConnection(): Promise<{
+		service: string;
+		db: string;
+	}> {
+		const response = await this.makeRequest<{ service: string; db: string }>(
+			'get',
+			'/api/v1/health',
+		);
+		return response.data;
 	}
 }

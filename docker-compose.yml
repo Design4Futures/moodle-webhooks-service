@@ -35,7 +35,7 @@ services:
     image: ${IMAGE_NAME:-design4futures/webhooks:latest}
     restart: unless-stopped
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3000}"
     env_file:
       - .env
     environment:
